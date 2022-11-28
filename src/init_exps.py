@@ -126,61 +126,80 @@ def simple_control_lunar(step_output: Tuple, rng: npr.Generator):
     return 2
 
 
-def lunar_control_look(step_output: Tuple, rng: npr.Generator,
-                       k3: float = 0.1):
-    # TODO: add paramter for t --> how far ahead to predict
+def _simple_lunar_project(x, y, dx, dy, theta, dtheta,
+                          k_main, k_theta_right, k_theta_left,
+                          dt = 0.1):
+    # simplified x, y model = only main thruster yields x, y change
+    #       at current step
+    #   x(t + t0) = x(t0) + dx/dt * dt
+    #   dx/dt(t + t0) = dx/dt(t0) + k_main * cos(theta) * dt
+    #   y(t + t0) = y(t0) + dy/dt * dt
+    #   dy/dt(t + t0) = dy/dt(t0) + k_main * sin(theta) * dt
+    #   theta(t + t0) = theta(t0) + dtheta/dt * dt
+    #   dtheta/dt(t + t0) = dtheta/dt + [k_theta_right - k_theta_left] * dt
+    num_step = 1. / dt
+    for _ in range(int(num_step)):
+        x += dx * dt
+        dx += k_main * np.cos(theta) * dt
+        y += dy * dt
+        dy += k_main * np.sin(theta) * dt
+        theta += dtheta * dt
+        dtheta += (k_theta_right - k_theta_left) * dt
+    return x, y, dx, dy, theta, dtheta
+   
 
-    # simple lunar model with look-ahead projection
-    # Taylor Series approximation
-    #   theta(t) = theta(t0) + k1 * t + k2/2 * t^2
-    # Apply this approximation at each timestep + assume k2
-    #       constant assumption = constant force from thrust
-    # additional assumptions:
-    #   1. work in t-steps = 1
-    #   2. k1 given by model's dtheta
-    # --> theta(t+1) = theta + dtheta + k3
-    # where we'll infer k3
-    x_targ = 0.
-    y_targ = 5.
+def lunar_control_infer(step_output: Tuple, rng: npr.Generator,
+                        k_r: float = 0.1,
+                        k_theta: float = 0.1):
+    # lunar control inference model
+    # forward projection taylor series
+    #   theta(t) = theta(t0) + dtheta/dt * t + 1/2 * dtheta^2 / dt^2 * t^2
+    #           theta(t0) = theta measured
+    #           dtheta/dt = dtheta measured
+    #           0.5 * dtheta^2/dt^2 = k_theta * [right booster] - k_theta * [left booster]
+    # simplified x, y model
+    #   only main thruster yields x, y changes
+    #   main thruster force = magnitude and direction = theta -->
+    #   x(t) = x(t0) + dx/dt * dt + F/2 cos(theta) * dt^2
+    #   y(t) = y(t0) + dy/dt * dt + F/2 sin(theta) * dt^2
 
+    # TODO: make these params:
+    x_target = 0
+    y_target = 1.25
+    # Assuming standard unit circle
+    theta_target = np.pi / 2.
+    v_target = np.array([x_target, y_target, theta_target])
+
+    # unpack
     obs = step_output[0]
-    x = obs[0]
-    y = obs[1]
-    # stopgap
-    if y > 1.4:
-        return 0
-    theta = obs[4]
-    dtheta = obs[5]
+    [x, y, dx, dy, theta, dtheta, _, _] = obs
 
-    # vector comparison
-    v_diff = np.array([x_targ - x, y_targ - y])
-    theta_adj = theta + (np.pi / 2.)
+    # adjust theta to standard unit circle
+    theta += np.pi / 2.
 
-    # Counterfactual
-    # predict new theta as a function of different thrusts
-    #   choose the option with the lower v_adj x magnitude
-    actions = (1, 3)
-    scores = []
-    for k_force in (k3, -k3):
-        theta_taylor = theta_adj + dtheta + k_force
-        v_dir = np.array([np.cos(theta_taylor), np.sin(theta_taylor)])
-        v_adj = v_diff - v_dir
-        scores.append(v_adj[0])
+    # factor for adjusting dx and dy to dx/dt and dy/dt
+    # NOTE: these are just approximations
+    dx = dx * 0.01
+    dy = dy * 0.01
+    dtheta = dtheta * 0.01
 
-    if rng.random() < 0.35:
-        if np.fabs(scores[0]) < np.fabs(scores[1]):
-            return actions[0]
-        return actions[1]
-    return 2
+    # action -> force mapping
+    #   action enum --> k_r, k_theta_rightboost, k_theta_left_boost
+    action_map = [[0, 0, 0],  # no boost
+                  [0, k_theta, 0],  # right boost
+                  [k_r, 0, 0],  # main boost
+                  [0, 0, k_theta]]  # left boost
 
-
-# Full On Inference system!
-# improvement on above system:
-# project x_new, y_new as well as theta_new
-# > for each thrust possibility
-# > > use taylor series to project new vector = v_new
-# > take thrust option that minimizes f(v_new, v_target)
-# ... need a good choice for f (probably just use a weighted average to start)
+    # project each possible action:
+    errs = []
+    for forces in action_map:
+        [_k_r, _k_theta_right, _k_theta_left] = forces
+        xp, yp, dxp, dyp, thetap, dthetap = _simple_lunar_project(x, y, dx, dy,
+                                                                  theta, dtheta,
+                                                                  _k_r, _k_theta_right, _k_theta_left)
+        # TODO: more work needed:
+        errs.append(np.sum(np.fabs(v_target - np.array([xp, yp, thetap]))))
+    return np.argmin(errs)
 
 
 if __name__ == "__main__":
@@ -191,8 +210,8 @@ if __name__ == "__main__":
     #env.reset(seed=42)
     #runner(env, partial(simple_control_lunar, rng = npr.default_rng(42)),
     #        max_step=500)
-    for k in [.005, .01]:
-        env.reset(seed=42)
-        runner(env, partial(lunar_control_look, rng = npr.default_rng(42), k3=k),
-                max_step=1000)
+    env.reset(seed=42)
+    runner(env, partial(lunar_control_infer, rng=npr.default_rng(42),
+                        k_r = .005, k_theta = .005),
+           max_step=500)
     env.close()
