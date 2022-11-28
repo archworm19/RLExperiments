@@ -72,50 +72,58 @@ class PID:
         return ut
 
 
-class SimpleControlLunar():
+def simple_control_lunar(step_output: Tuple, rng: npr.Generator):
+    # problem formulation?
+    # target: x_targ, y_targ, sigma_targ
+    #       = (0, 1.4, 0)
+    # there are 2 vectors of interest for this formulation
+    #   1. direction vector for rocket: v_dir
+    #   2. vector from rocket x,y to correct x,y: v_diff
+    #
+    # top-level goal: align the 2 vectors
+    #       minimize angle between them
+    #
+    # v_diff = [dx, dy] = [x_targ - x, y_targ - y] (x, y)
+    # v_dir = [1, theta] (assumes r = 1 for direction vector) (polar)
+    #       = [cos(theta), sin(theta)]  (x, y)
 
-    def __init__(self):
-        # simple goal:
-        #   keep y at 1.4
-        #   keep theta at 0
-        self.pid_y = PID(1.4, 0.3, 0.5, 0.0)
-        self.pid_theta = PID(0., 0.1, 0.5, 0.0)
-        self.rng = npr.default_rng(42)
+    # NOTE on theta: theta = 0 when rocket is upright
+    #   --> adjust theta (theta_adj) to make math work
 
-    def __call__(self, step_output: Tuple):
-        obs = step_output[0]
-        # x = obs[0]
-        y = obs[1]
-        # dx = obs[2]
-        # dy = obs[3]
-        theta = obs[4]
-        # dtheta = obs[5]
-        u_y = self.pid_y.control_step(y)
-        u_theta = self.pid_theta.control_step(theta)
+    # NOTE: super lazy stop gap
+    #   > set y_targ very high
+    #   > turn off booster if rocket gets out of screen
+    #   == should prevent flipping as rocket will not get above y_targ
 
-        print(u_y)
-        print(u_theta)
+    x_targ = 0.
+    y_targ = 5.
 
-        # randomly select based on u magnitude
-        p = np.fabs(u_y) / (np.fabs(u_y) + np.fabs(u_theta))
+    obs = step_output[0]
+    x = obs[0]
+    y = obs[1]
 
-        print(p)
-        input("cont?")
+    # stopgap
+    if y > 1.5:
+        return 0
 
-        if self.rng.random() < p:
-            # main booster
-            if u_y > 0.:
-                return 2
-            return 0
-        else:
-            # TODO: not sure about angles
-            if u_theta < 0.:
-                return 3
-            return 1
+    # dx = obs[2]
+    # dy = obs[3]
+    theta = obs[4]
+    v_diff = np.array([x_targ - x, y_targ - y])
+    theta_adj = theta + (np.pi / 2.)
+    v_dir = np.array([np.cos(theta_adj), np.sin(theta_adj)])
+    v_adj = v_diff - v_dir
+    if rng.random() < 0.35:
+        # left booster:
+        if v_adj[0] > 0:
+            return 3
+        return 1
+    return 2
 
 
 if __name__ == "__main__":
     # lunar lander
     env = gym.make("LunarLander-v2", render_mode="human")
     # runner(env, partial(semi_random_policy, rng = npr.default_rng(42)))
-    runner(env, SimpleControlLunar())
+    runner(env, partial(simple_control_lunar, rng = npr.default_rng(42)),
+           max_step=1000)
