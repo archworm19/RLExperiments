@@ -34,12 +34,15 @@ class ScalarModel(ABC):
 
 class QLearning(Layer):
 
-    def __init__(self, model: ScalarModel, num_actions: int):
+    def __init__(self, model: ScalarModel, num_actions: int,
+                 gamma: float):
         # NOTE: currently assumes discrete action space
         super(QLearning, self).__init__()
         self.model = model
         self.num_actions = num_actions
+        self.gamma = gamma
 
+    # TODO: maybe max_action should operate on a batch
     def _build_action_probes(self, state: List[tf.Tensor]):
         # helper function for action selection
         # returns all possible action-state combos
@@ -80,9 +83,68 @@ class QLearning(Layer):
         scores = self.model.eval(action_t, tile_states)
         return tf.math.argmax(scores)
 
+    def calc_target(self,
+                    reward: tf.Tensor,
+                    max_action: tf.Tensor,
+                    state: List[tf.Tensor]):
+        """Follows convention of original deep Q learning papers
+            Mnih et al and Hasselt et al
+
+            target = Y_t
+            Y_t = R_{t+1} +
+                  gamma * max_a [ Q(S_{t+1}, a; sigma_t)]
+
+        Args:
+            reward (tf.Tensor): reward at timestep t+1
+                shape = batch_size (scalar reward)
+            max_action (tf.Tensor): action that maximizes Q
+                given state
+                shape = batch_size x action_dims
+                typically one-hot
+            state (List[tf.Tensor]): state at time t+1
+                set of input tensors
+                each with shape:
+                    batch_size x ...
+
+        Returns:
+            tf.Tensor: Y_t / target
+                tensor shape = batch_size
+                if underlying model is differentiable,
+                    this output is differentiable
+        """
+        return (reward +
+                self.gamma * self.model.eval(max_action, state))
+
+    def call(self,
+             reward: tf.Tensor,
+             action_t: tf.Tensor,
+             state_t: List[tf.Tensor],
+             state_t1: List[tf.Tensor]):
+        """Q error
+
+        Args:
+            reward (tf.Tensor): reward at time t
+                shape = batch_size
+            action_t (tf.Tensor): action at time t
+                shape = batch_size x num_action
+            state_t (tf.Tensor): state at time t
+                each tensor has shape batch_size x ...
+            state_t1 (tf.Tensor): state at time t+1
+                each tensor has shape batch_size x ...
+
+        Returns:
+            tf.Tensor: Q error
+                shape = batch_size 
+        """
+        # TODO: here's the issue with max_action
+        # we want to be able to calculate max action
+        # for both batched and unbatched data
+        # > batched: for calculating target
+        # > unbatched: for live serving
+        #           should probably be a separate interface...
+        pass
 
 
-    # TODO: evaluation
 
 
 # TODO: Double Q Learning
