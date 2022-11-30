@@ -37,12 +37,12 @@ class QLearning(Layer):
     def __init__(self, model: ScalarModel, num_actions: int,
                  gamma: float):
         # NOTE: currently assumes discrete action space
+        assert gamma > 0. and gamma <= 1.
         super(QLearning, self).__init__()
         self.model = model
         self.num_actions = num_actions
         self.gamma = gamma
 
-    # TODO: maybe max_action should operate on a batch
     def _build_action_probes(self, state: List[tf.Tensor]):
         # helper function for action selection
         # returns all possible action-state combos
@@ -122,8 +122,11 @@ class QLearning(Layer):
              state_t1: List[tf.Tensor]):
         """Q error
 
+            Q error = (Y_t - Q(S_t, A_t; sigma_t))^2
+                where Y_t = R_{t+1} + gamma * max_a[ Q(S_{t + 1}, a; sigma_t^-1 ]
+
         Args:
-            reward (tf.Tensor): reward at time t
+            reward (tf.Tensor): reward at time t+1
                 shape = batch_size
             action_t (tf.Tensor): action at time t
                 shape = batch_size x num_action
@@ -133,17 +136,27 @@ class QLearning(Layer):
                 each tensor has shape batch_size x ...
 
         Returns:
-            tf.Tensor: Q error
-                shape = batch_size 
+            tf.Tensor: Q error (non-reduced)
+                shape = batch_size
+            tf.Tensor: Y_t
+                shape = batch_size
         """
-        # TODO: here's the issue with max_action
-        # we want to be able to calculate max action
-        # for both batched and unbatched data
-        # > batched: for calculating target
-        # > unbatched: for live serving
-        #           should probably be a separate interface...
-        pass
-
+        # max action calc: get reward estimate
+        # for each, for each batch elem
+        scores = []
+        for i in range(self.num_actions):
+            batch_size = tf.shape(action_t)[0]
+            action_t1 = tf.tile(tf.expand_dims(tf.one_hot(i, self.num_actions), 0),
+                                [batch_size, 1])
+            # Q(S_{t+1}, a_i)
+            # --> shape = batch_size
+            scores.append(self.model.eval(action_t1, state_t1))
+        max_score = tf.math.reduce_max(tf.stack(scores, axis=0), axis=0)
+        # bring it all together
+        Y_t = reward + self.gamma * max_score
+        # Q(S_t, A_t)
+        Q_t = self.model.eval(action_t, state_t)
+        return tf.math.pow(Y_t - Q_t, 2.), Y_t
 
 
 
@@ -158,11 +171,11 @@ if __name__ == "__main__":
             super(FakeModel, self).__init__()
 
         def eval(self, action_t: tf.Tensor, state: List[tf.Tensor]):
-            return tf.range(tf.shape(action_t)[0])
+            return tf.cast(tf.range(tf.shape(action_t)[0]), tf.float32)
 
 
     state = [tf.ones([3, 5])]
-    QL = QLearning(FakeModel(), 4)
+    QL = QLearning(FakeModel(), 4, 0.95)
     action_t, tile_states = QL._build_action_probes(state)
     assert tf.math.reduce_all(tf.shape(action_t) ==
                               tf.constant([4, 4], dtype=tf.int32))
@@ -170,3 +183,11 @@ if __name__ == "__main__":
                               tf.constant([4, 3, 5], dtype=tf.int32))
     max_action = QL.select_action(state)
     assert tf.math.reduce_all(max_action == tf.constant(3, dtype=tf.int64))
+
+    # testing q error
+    action_t = tf.constant([[1, 0, 0, 0],
+                            [0, 1, 0, 0],  # good action
+                            [0, 0, 1, 0]], dtype=tf.float32)
+    reward_t1 = tf.constant([0, 1, 0], dtype=tf.float32)
+    Q_err, Y_t = QL.call(reward_t1, action_t, state, state)
+    assert tf.argmax(Q_err).numpy() == 1
