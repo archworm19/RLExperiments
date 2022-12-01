@@ -48,18 +48,20 @@ class QAgent(Agent):
                                  name="state", dtype=tf.float32),
                   tf.keras.Input(shape=(state_dims,),
                                  name="state_t1", dtype=tf.float32)]
-        outputs = {"loss": QLearning(gamma).calc_error(num_actions,
-                                                       scalar_model,
-                                                       inputs[1],
-                                                       inputs[0],
-                                                       [inputs[2]],
-                                                       [inputs[3]])}
+        Qerr, _ = QLearning(gamma).calc_error(num_actions,
+                                              scalar_model,
+                                              inputs[1],
+                                              inputs[0],
+                                              [inputs[2]],
+                                              [inputs[3]])
+        outputs = {"loss": tf.math.reduce_mean(Qerr)}
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs=outputs)
         self.kmodel.compile(optimizer=tf.keras.optimizers.Adam(.01))
 
     def select_action(self, state: List[np.ndarray]):
+        # TODO: missing randomness!!!
         """greedy action selection
 
         Args:
@@ -106,8 +108,8 @@ if __name__ == "__main__":
     #   else --> no reward
     import numpy.random as npr
     rng = npr.default_rng(42)
-    states = rng.random((100, 2)) - 0.5
-    action0 = (rng.random((100,)) > 0.5) * 1
+    states = rng.random((1000, 2)) - 0.5
+    action0 = (rng.random((1000,)) > 0.5) * 1
     actions = np.vstack((action0, 1. - action0)).T
     rewards = (1. * (np.sum(states, axis=1) > 0.)) * action0
     dat = RunData(states[:-1], states[1:], actions[:-1],
@@ -129,8 +131,28 @@ if __name__ == "__main__":
             yp = self.net(tf.concat([x_a, x_s], axis=1))
             return yp[:, 0]  # to scalar
 
-    QA = QAgent(DenseScalar(), 2, 2)
+    QA = QAgent(DenseScalar(), 2, 2,
+                gamma=0.8)
     dset = QA._build_dset(dat)
+
+    # testing dataset format and model running
     for v in dset:
         print(v)
+        print(QA.kmodel(v))
+        break
+    # testing action selection (pre train)
+    print(QA.select_action([states[0]]))
+
+    # testing training
+    QA.train(dat, 8)
+
+    # expectation?
+    # > s_{t} > 0, a_{t} = 0: max ~ when reward is 1
+    # > all else will be smaller
+    # ... difference will get more extreme as gamma --> 0
+    for v in dset:
+        rews = v["reward"].numpy()
+        q = QA.scalar_model(v["action"], [v["state"]]).numpy()
+        print(np.mean(q[rews >= 0.5]))
+        print(np.mean(q[rews <= 0.5]))
         break
