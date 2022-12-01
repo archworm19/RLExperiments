@@ -6,6 +6,7 @@
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
 """
 import numpy as np
+import numpy.random as npr
 import tensorflow as tf
 from typing import List
 from tensorflow.keras.layers import Layer
@@ -21,7 +22,8 @@ class QAgent(Agent):
                  scalar_model: Layer,
                  num_actions: int,
                  state_dims: int,
-                 gamma: float = 0.95):
+                 gamma: float = 0.95,
+                 rand_act_prob: float = 0.25):
         """
         Args:
             scalar_model (Layer): keras layer where the call
@@ -37,6 +39,8 @@ class QAgent(Agent):
         super(QAgent, self).__init__()
         self.scalar_model = scalar_model
         self.num_actions = num_actions
+        self.rand_act_prob = rand_act_prob
+        self.rng = npr.default_rng(42)
 
         # TODO: is this really the right place
         # to build the custom model?
@@ -58,7 +62,7 @@ class QAgent(Agent):
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs=outputs)
-        self.kmodel.compile(optimizer=tf.keras.optimizers.Adam(.01))
+        self.kmodel.compile(optimizer=tf.keras.optimizers.Adam(.001))
 
     def select_action(self, state: List[np.ndarray]):
         # TODO: missing randomness!!!
@@ -72,6 +76,8 @@ class QAgent(Agent):
         Returns:
             int: index of selected action
         """
+        if self.rng.random() < self.rand_act_prob:
+            return self.rng.integers(0, self.num_actions)
         # --> action_t = num_actions x num_actions
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
@@ -87,7 +93,7 @@ class QAgent(Agent):
                 "state": run_data.states,
                 "state_t1": run_data.states_t1}
         dset = tf.data.Dataset.from_tensor_slices(dmap)
-        return dset.shuffle(5000).batch(32)
+        return dset.shuffle(25000).batch(32)
 
     def train(self, run_data: RunData, num_epoch: int):
         """train agent on run data
@@ -106,7 +112,6 @@ if __name__ == "__main__":
     # test on fake dataset:
     #   sum[state] > 0 and action = 1 --> reward
     #   else --> no reward
-    import numpy.random as npr
     rng = npr.default_rng(42)
     states = rng.random((1000, 2)) - 0.5
     action0 = (rng.random((1000,)) > 0.5) * 1
