@@ -67,33 +67,29 @@ class QLearning():
         return tf.math.pow(Y_t - Q_t, 2.), Y_t
 
 
-# TODO: Double Q Learning
-# ... will probably need its own agent
-
 
 if __name__ == "__main__":
-    class FakeModel(ScalarModel):
+    class FakeModel(Layer):
         def __init__(self):
             super(FakeModel, self).__init__()
 
-        def eval(self, action_t: tf.Tensor, state: List[tf.Tensor]):
+        def call(self, action_t: tf.Tensor, state: List[tf.Tensor]):
             return tf.cast(tf.range(tf.shape(action_t)[0]), tf.float32)
 
-
     state = [tf.ones([3, 5])]
-    QL = QLearning(FakeModel(), 4, 0.95)
-    action_t, tile_states = QL._build_action_probes(state)
-    assert tf.math.reduce_all(tf.shape(action_t) ==
-                              tf.constant([4, 4], dtype=tf.int32))
-    assert tf.math.reduce_all(tf.shape(tile_states[0]) ==
-                              tf.constant([4, 3, 5], dtype=tf.int32))
-    max_action = QL.select_action(state)
-    assert tf.math.reduce_all(max_action == tf.constant(3, dtype=tf.int64))
 
     # testing q error
     action_t = tf.constant([[1, 0, 0, 0],
                             [0, 1, 0, 0],  # good action
                             [0, 0, 1, 0]], dtype=tf.float32)
     reward_t1 = tf.constant([0, 1, 0], dtype=tf.float32)
-    Q_err, Y_t = QL.call(reward_t1, action_t, state, state)
+    Q_err, Y_t = QLearning(0.95).calc_error(tf.shape(action_t)[1],
+                                           FakeModel(),
+                                           reward_t1, action_t,
+                                           state, state)
+    # sample 1 has the largest error because
+    #   1. the Q values are identical for all samples
+    #   2. sample 1 has a reward -->
+    #       thus, Q_t != Q_{t_1}
+    #           (expected reward is different cuz of immediate reward)
     assert tf.argmax(Q_err).numpy() == 1
