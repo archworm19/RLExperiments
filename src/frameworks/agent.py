@@ -14,8 +14,8 @@ from dataclasses import dataclass
 class RunData:
     # TODO: for larger datasets --> this will need
     # to be changed to an interface
-    states: List[np.ndarray]
-    states_t1: List[np.ndarray]
+    states: np.ndarray
+    states_t1: np.ndarray
     # typically one-hots
     actions: np.ndarray
     rewards: np.ndarray
