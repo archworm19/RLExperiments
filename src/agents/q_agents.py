@@ -100,10 +100,11 @@ if __name__ == "__main__":
     # test on fake dataset:
     #   sum[state] > 0 and action = 1 --> reward
     #   else --> no reward
-    from numpy.random import npr
+    import numpy.random as npr
     rng = npr.default_rng(42)
     states = rng.random((100, 2)) - 0.5
     action0 = (rng.random((100,)) > 0.5) * 1
     actions = np.vstack((action0, 1. - action0)).T
     rewards = (1. * (np.sum(states, axis=1) > 0.)) * action0
     dat = RunData([states[:-1]], [states[1:]], actions[:-1], rewards[:-1])
+    print(dat)

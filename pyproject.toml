@@ -1,0 +1,4 @@
+[project]
+name = "rlexperiments"
+version = "0.0.1"
+description = "Reinforcement learning tools and experiments"
