@@ -16,6 +16,7 @@ class RunData:
     # to be changed to an interface
     states: List[np.ndarray]
     states_t1: List[np.ndarray]
+    # typically one-hots
     actions: np.ndarray
     rewards: np.ndarray
 

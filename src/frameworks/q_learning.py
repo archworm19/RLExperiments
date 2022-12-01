@@ -67,7 +67,6 @@ class QLearning():
         return tf.math.pow(Y_t - Q_t, 2.), Y_t
 
 
-
 if __name__ == "__main__":
     class FakeModel(Layer):
         def __init__(self):
