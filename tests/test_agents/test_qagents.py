@@ -25,7 +25,8 @@ class DenseScalar(Layer):
         return yp[:, 0]  # to scalar
 
 
-def _fake_data_reward_button(num_samples: int = 5000):
+def _fake_data_reward_button(num_samples: int = 5000,
+                             r = 1.):
     # "reward button":
     # if agent executes the reward action --> gets reward
     rng = npr.default_rng(42)
@@ -33,7 +34,7 @@ def _fake_data_reward_button(num_samples: int = 5000):
     action0 = (rng.random((num_samples,)) > 0.5) * 1
     # --> one-hot
     actions = np.vstack((action0, 1. - action0)).T
-    rewards = action0
+    rewards = action0 * r
     dat = RunData(states[:-1], states[1:], actions[:-1],
                   rewards[:-1])
     return dat
@@ -57,7 +58,8 @@ class TestDQN(TestCase):
             break
 
     def test_reward_button(self):
-        dat = _fake_data_reward_button(5000)
+        r = 2.
+        dat = _fake_data_reward_button(5000, r=r)
         self.QA.train(dat, 15)
         # expectation?
         # Q learning: Q(t) = r_{t+1} + gamma * max_{a} [ Q(t+1) ]
@@ -68,21 +70,22 @@ class TestDQN(TestCase):
         #           = r * 1 / (1 - gamma) (power series)
         #   so, Q should converge to this value
         #
-        # back to og eqn:
+        # back to og eqn: (where r_{t+1} = r; else subtract r from this)
         #       sub in max_{a} [ Q(t+1) ] = r + gamma * r + ...
         #       Q(t) = r + gamma * (r + gamma + gamma^2)
         #       Q(t) = r + gamma * r + gamma^2 * r
         # in fact, this is closely related to the Bellman eqns on
         #   which Q learning is built
-        exp_q = 1. / (1. - self.QA.gamma)
+        exp_q = r * 1. / (1. - self.QA.gamma)
 
         for v in self.QA._build_dset(dat):
             rews = v["reward"].numpy()
             q = self.QA.scalar_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
+            print(q)
             self.assertAlmostEqual(exp_q, q_rew, places=2)
-            self.assertAlmostEqual(exp_q - 1., q_no, places=2)
+            self.assertAlmostEqual(exp_q - r, q_no, places=2)
             break
 
 
