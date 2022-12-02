@@ -40,6 +40,7 @@ class QAgent(Agent):
         self.scalar_model = scalar_model
         self.num_actions = num_actions
         self.rand_act_prob = rand_act_prob
+        self.gamma = gamma
         self.rng = npr.default_rng(42)
 
         # TODO: is this really the right place
@@ -106,58 +107,3 @@ class QAgent(Agent):
         history = self.kmodel.fit(dset,
                                   epochs=num_epoch)
         return history
-
-
-if __name__ == "__main__":
-    # test on fake dataset:
-    #   sum[state] > 0 and action = 1 --> reward
-    #   else --> no reward
-    rng = npr.default_rng(42)
-    states = rng.random((1000, 2)) - 0.5
-    action0 = (rng.random((1000,)) > 0.5) * 1
-    actions = np.vstack((action0, 1. - action0)).T
-    rewards = (1. * (np.sum(states, axis=1) > 0.)) * action0
-    dat = RunData(states[:-1], states[1:], actions[:-1],
-                  rewards[:-1])
-    print(dat)
-
-    from tensorflow.keras.layers import Dense
-    from arch_layers.simple_networks import DenseNetwork
-    class DenseScalar(Layer):
-        def __init__(self):
-            super(DenseScalar, self).__init__()
-            self.d_act = Dense(4)
-            self.d_state = Dense(4)
-            self.net = DenseNetwork([10], 1, 0.)
-
-        def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
-            x_a = self.d_act(action_t)
-            x_s = self.d_state(state_t[0])
-            yp = self.net(tf.concat([x_a, x_s], axis=1))
-            return yp[:, 0]  # to scalar
-
-    QA = QAgent(DenseScalar(), 2, 2,
-                gamma=0.8)
-    dset = QA._build_dset(dat)
-
-    # testing dataset format and model running
-    for v in dset:
-        print(v)
-        print(QA.kmodel(v))
-        break
-    # testing action selection (pre train)
-    print(QA.select_action([states[0]]))
-
-    # testing training
-    QA.train(dat, 8)
-
-    # expectation?
-    # > s_{t} > 0, a_{t} = 0: max ~ when reward is 1
-    # > all else will be smaller
-    # ... difference will get more extreme as gamma --> 0
-    for v in dset:
-        rews = v["reward"].numpy()
-        q = QA.scalar_model(v["action"], [v["state"]]).numpy()
-        print(np.mean(q[rews >= 0.5]))
-        print(np.mean(q[rews <= 0.5]))
-        break
