@@ -17,6 +17,12 @@ class QLearning():
         super(QLearning, self).__init__()
         self.gamma = gamma
 
+    # TODO: here's the problem:
+    #   typically: you don't diff through the target
+    #   ... instead: you use predictions from the model before training
+    #   NOTE: stopping the gradient won't work cuz the predictions are still getting shifted
+    #   soln? 1. don't operate on scalar model at all --> just take in tensors
+    #         2. ... then: it can work with either DQN or double DQN
     def calc_error(self,
                    num_actions: int,
                    scalar_model: Layer,
@@ -64,7 +70,7 @@ class QLearning():
         Y_t = reward + self.gamma * max_score
         # Q(S_t, A_t)
         Q_t = scalar_model(action_t, state_t)
-        return tf.math.pow(Y_t - Q_t, 2.), Y_t
+        return tf.math.pow(Y_t - Q_t, 2.), Y_t, Q_t
 
 
 if __name__ == "__main__":
@@ -82,13 +88,20 @@ if __name__ == "__main__":
                             [0, 1, 0, 0],  # good action
                             [0, 0, 1, 0]], dtype=tf.float32)
     reward_t1 = tf.constant([0, 1, 0], dtype=tf.float32)
-    Q_err, Y_t = QLearning(0.95).calc_error(tf.shape(action_t)[1],
-                                           FakeModel(),
-                                           reward_t1, action_t,
-                                           state, state)
+    Q_err, Y_t, Q_t = QLearning(0.95).calc_error(tf.shape(action_t)[1],
+                                                 FakeModel(),
+                                                 reward_t1, action_t,
+                                                 state, state)
     # sample 1 has the largest error because
     #   1. the Q values are identical for all samples
     #   2. sample 1 has a reward -->
     #       thus, Q_t != Q_{t_1}
     #           (expected reward is different cuz of immediate reward)
     assert tf.argmax(Q_err).numpy() == 1
+    print(Q_t)
+    print(Y_t)
+
+
+    # TODO: is there a more thorough test?
+    # something inspired by cartpole?
+    #   

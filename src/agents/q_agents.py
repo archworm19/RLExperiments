@@ -53,19 +53,28 @@ class QAgent(Agent):
                                  name="state", dtype=tf.float32),
                   tf.keras.Input(shape=(state_dims,),
                                  name="state_t1", dtype=tf.float32)]
-        Qerr, _ = QLearning(gamma).calc_error(num_actions,
-                                              scalar_model,
-                                              inputs[1],
-                                              inputs[0],
-                                              [inputs[2]],
-                                              [inputs[3]])
-        outputs = {"loss": tf.math.reduce_mean(Qerr)}
+        Qerr, Y_t, Q_t = QLearning(gamma).calc_error(num_actions,
+                                                     scalar_model,
+                                                     inputs[1],
+                                                     inputs[0],
+                                                     [inputs[2]],
+                                                     [inputs[3]])
+        outputs = {"loss": tf.math.reduce_mean(Qerr),
+                   "Qerr": Qerr,
+                   "Y_t": Y_t,
+                   "Q_t": Q_t}
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs=outputs)
-        self.kmodel.compile(optimizer=tf.keras.optimizers.Adam(.001))
+        self.kmodel.compile(tf.keras.optimizers.SGD(learning_rate=0.001,
+                                                    momentum=0.0,
+                                                    nesterov=False,
+                                                    name="SGD"))
 
-    def select_action(self, state: List[np.ndarray]):
+    def init_action(self):
+        return self.rng.integers(0, self.num_actions)
+
+    def select_action(self, state: List[np.ndarray], debug: bool = False):
         # TODO: missing randomness!!!
         """greedy action selection
 
@@ -78,12 +87,22 @@ class QAgent(Agent):
             int: index of selected action
         """
         if self.rng.random() < self.rand_act_prob:
+            if debug:
+                print("rand select")
             return self.rng.integers(0, self.num_actions)
         # --> action_t = num_actions x num_actions
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
         # --> shape = num_actions
         scores = self.scalar_model(action_t, state_t)
+
+        if debug:
+            print('action; state; scores')
+            print(action_t)
+            print(state_t)
+            print(scores)
+            print(tf.argmax(scores).numpy())
+
         # greedy
         return tf.argmax(scores).numpy()
 
@@ -94,9 +113,9 @@ class QAgent(Agent):
                 "state": run_data.states,
                 "state_t1": run_data.states_t1}
         dset = tf.data.Dataset.from_tensor_slices(dmap)
-        return dset.shuffle(25000).batch(32)
+        return dset.shuffle(1000000).batch(256)
 
-    def train(self, run_data: RunData, num_epoch: int):
+    def train(self, run_data: RunData, num_epoch: int, debug: bool = False):
         """train agent on run data
 
         Args:
@@ -104,6 +123,18 @@ class QAgent(Agent):
             num_epoch (int):
         """
         dset = self._build_dset(run_data)
+
+        if debug:
+            input("DEBUG")
+            for i, v in enumerate(dset):
+                if i >= 10:
+                    break
+                print(v["reward"][:5])
+                vout = self.kmodel(v)
+                print(vout["Y_t"][:5])
+                print(vout["Q_t"][:5])
+                input("cont?")
+
         history = self.kmodel.fit(dset,
                                   epochs=num_epoch)
         return history

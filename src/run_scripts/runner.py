@@ -14,6 +14,7 @@ def _one_hot(x: np.ndarray, num_action: int):
     return x_oh
 
 
+# TODO: biggest concern: I'm still not sure alignment is correct
 def runner(env: gym.Env,
            agent: Agent,
            max_step: int = 200,
@@ -25,16 +26,15 @@ def runner(env: gym.Env,
     # action_model must keep track of (memory)
     #   1. previous observations, 2. previous actions
     # action model must take in env.step output
-    action = init_action
-    obs, actions, rewards, other = [], [], [], []
+    action = agent.init_action()
+    state0 = env.step(init_action)[0]
+    cur_state = state0
+    obs, actions, rewards, other = [state0], [], [], []
     for _ in range(max_step):
-        # yields: s_{t+1}, r_{t+1}
+        action = agent.select_action([cur_state], debug=debug)
         step_output = env.step(action)
-        # yields: a_{t+1}
-        # TODO: generalize kind of information
-        #   that can be handed to agent
-        action = agent.select_action([step_output[0]], debug=debug)
-        obs.append(step_output[0])
+        cur_state = step_output[0]
+        obs.append(cur_state)
         actions.append(action)
         rewards.append(step_output[1])
         other.append(step_output[2:])
@@ -51,8 +51,8 @@ def runner(env: gym.Env,
     return RunData(np.array(obs[:-1]),
                    np.array(obs[1:]),
                    # TODO: hack...
-                   _one_hot(np.array(actions[:-1]), agent.num_actions),
-                   np.array(rewards[1:]))
+                   _one_hot(np.array(actions), agent.num_actions),
+                   np.array(rewards))
 
 
 # epochs
@@ -64,10 +64,12 @@ def run_epoch(env: gym.Env,
               max_step: int,
               run_iters: int,
               p: float, rng: npr.Generator,
-              termination_reward: float = None):
+              termination_reward: float = None,
+              debug: float = False):
     # samping/processing wrapper for run output
     def sample(v: RunData):
         sel = rng.random(np.shape(v.states)[0]) <= p
+        # TODO: this is lazy
         if termination_reward is not None:
             v.rewards[-1] = termination_reward
         return RunData(v.states[sel], v.states_t1[sel],
@@ -81,5 +83,5 @@ def run_epoch(env: gym.Env,
                          np.concatenate([struct.states_t1, add_struct.states_t1], axis=0),
                          np.concatenate([struct.actions, add_struct.actions], axis=0),
                          np.concatenate([struct.rewards, add_struct.rewards], axis=0))
-    agent.train(struct, 12)
+    agent.train(struct, 24, debug=debug)
     return struct
