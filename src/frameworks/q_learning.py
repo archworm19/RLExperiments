@@ -1,107 +1,121 @@
 """Deep Q Learning Frameworks
-
-    scalar_model assumption:
-        call has the following signature:
-            call(action_t: tf.Tensor, state_t: List[tf.Tensor])
 """
 import tensorflow as tf
 from typing import List
 from tensorflow.keras.layers import Layer
 
 
-class QLearning():
+# Model-Agnostic Q Error
 
-    def __init__(self, gamma: float):
-        # NOTE: currently assumes discrete action space
-        assert gamma > 0. and gamma <= 1.
-        super(QLearning, self).__init__()
-        self.gamma = gamma
 
-    # TODO: here's the problem:
-    #   typically: you don't diff through the target
-    #   ... instead: you use predictions from the model before training
-    #   NOTE: stopping the gradient won't work cuz the predictions are still getting shifted
-    #   soln? 1. don't operate on scalar model at all --> just take in tensors
-    #         2. ... then: it can work with either DQN or double DQN
-    def calc_error(self,
-                   num_actions: int,
-                   scalar_model: Layer,
-                   reward: tf.Tensor,
-                   action_t: tf.Tensor,
-                   state_t: List[tf.Tensor],
+def calc_q_error(q_t: tf.Tensor, max_q_t1: tf.Tensor,
+                 reward_t1, gamma: float):
+    """Q error
+
+        Q error = (Y_t - Q(S_t, A_t; sigma_t))^2
+            where Y_t = R_{t+1} + gamma * max_a[ Q(S_{t + 1}, a; sigma_t^-1 ]
+
+        NOTE: this can be used with q learning or double q learning
+
+    Args:
+        q_t (tf.Tensor): Q(s_{t}, a_{t})
+            shape = batch_size
+        max_q_t1 (tf.Tensor): max_a' [Q(s_{t+1}, a')]
+            shape = batch_size
+        reward_t1 (_type_): reward at time t+1
+            shape = batch_size
+        gamma (float): discount factor
+
+    Returns:
+        tf.Tensor: Q error
+        tf.Tensor: Y_t = target
+            both have shape = batch_size
+    """
+    Y_t = reward_t1 + gamma * max_q_t1
+    return tf.math.pow(Y_t - q_t, 2.), Y_t
+
+
+# Model-Dependent Q calculation
+
+
+def _greedy_select(selection_model: Layer,
+                   num_action: int,
                    state_t1: List[tf.Tensor]):
-        """Q error
+    """greedy action selection using selection model
 
-            Q error = (Y_t - Q(S_t, A_t; sigma_t))^2
-                where Y_t = R_{t+1} + gamma * max_a[ Q(S_{t + 1}, a; sigma_t^-1 ]
+    Args:
+        selection_model (Layer):
+        num_action (int):
+        state_t1 (List[tf.Tensor]):
+            see calc_q_error_sm
 
-        Args:
-            num_actions (int): number of possible actions
-            scalar_model (ScalarModel): model that computes Q values
-                = max expected reward
-                must output scalars
-            reward (tf.Tensor): reward at time t+1
-                shape = batch_size
-            action_t (tf.Tensor): action at time t
-                shape = batch_size x num_action
-            state_t (tf.Tensor): state at time t
-                each tensor has shape batch_size x ...
-            state_t1 (tf.Tensor): state at time t+1
-                each tensor has shape batch_size x ...
-
-        Returns:
-            tf.Tensor: Q error (non-reduced)
-                shape = batch_size
-            tf.Tensor: Y_t
-                shape = batch_size
-        """
-        # max action calc: get reward estimate
-        # for each, for each batch elem
-        scores = []
-        for i in range(num_actions):
-            batch_size = tf.shape(action_t)[0]
-            action_t1 = tf.tile(tf.expand_dims(tf.one_hot(i, num_actions), 0),
-                                [batch_size, 1])
-            # Q(S_{t+1}, a_i)
-            # --> shape = batch_size
-            scores.append(scalar_model(action_t1, state_t1))
-        max_score = tf.math.reduce_max(tf.stack(scores, axis=0), axis=0)
-        # bring it all together
-        Y_t = reward + self.gamma * max_score
-        # Q(S_t, A_t)
-        Q_t = scalar_model(action_t, state_t)
-        return tf.math.pow(Y_t - Q_t, 2.), Y_t, Q_t
+    Returns:
+        tf.Tensor: idx of maximizing action for each
+            batch_sample
+            shape = batch_size
+        tf.Tensor: q scores for all options
+            shape = batch_size x num_actions
+    """
+    qsels = []
+    for i in range(num_action):
+        # --> shape = num_action
+        v_hot = tf.one_hot(i, num_action)
+        # --> shape = batch_size x num_action
+        v = tf.tile(tf.expand_dims(v_hot, 0),
+                    [tf.shape(state_t1[0])[0], 1])
+        # qt1: shape = batch_size
+        qt1 = selection_model(v, state_t1)
+        qsels.append(qt1)
+    # indices of greedily selected actions
+    # --> shape = batch_size
+    qsels = tf.stack(qsels, axis=1)
+    max_a = tf.argmax(qsels, axis=1)
+    return max_a, qsels
 
 
-if __name__ == "__main__":
-    class FakeModel(Layer):
-        def __init__(self):
-            super(FakeModel, self).__init__()
+def calc_q_error_sm(selection_model: Layer,
+                    eval_model: Layer,
+                    action_t: tf.Tensor,
+                    reward_t1: tf.Tensor,
+                    state_t: List[tf.Tensor],
+                    state_t1: List[tf.Tensor],
+                    num_action: int,
+                    gamma: float):
+    """Calculate the Q error given 2 scalar models
+        This is based on the idea of double Q learning
+            but can be used for regular Q learning
+            by passing in one model for both args
+        Idea:
+            > selection: greedily select an action using
+                the selection model
+            > evaluation: calculate max_a[Q(t+1)]
+                using the evaluation model
 
-        def call(self, action_t: tf.Tensor, state: List[tf.Tensor]):
-            return tf.cast(tf.range(tf.shape(action_t)[0]), tf.float32)
+        NOTE: Q(t) is calculated from the selection model
+            TODO: is this right?
 
-    state = [tf.ones([3, 5])]
+    Args:
+        selection_model (Layer): model that selects action
+        eval_model (Layer): model that calculates Q values for selected action
+            scalar_model assumption:
+                call has the following signature:
+                    call(action_t: tf.Tensor, state_t: List[tf.Tensor])
+        action_t (tf.Tensor): action at time t
+        reward_t1 (tf.Tensor): reward at time t+1 (follows from action_t)
+        state_t (List[tf.Tensor]): state at time t
+        state_t1 (List[tf.Tensor]): state at time t+1
+            state_t + actiom_t --> reward_t1, state_t1 
+        num_actions (int): number of actions available to agent
+            only works for discrete action space
+        gamma (float): q learning discount factor
 
-    # testing q error
-    action_t = tf.constant([[1, 0, 0, 0],
-                            [0, 1, 0, 0],  # good action
-                            [0, 0, 1, 0]], dtype=tf.float32)
-    reward_t1 = tf.constant([0, 1, 0], dtype=tf.float32)
-    Q_err, Y_t, Q_t = QLearning(0.95).calc_error(tf.shape(action_t)[1],
-                                                 FakeModel(),
-                                                 reward_t1, action_t,
-                                                 state, state)
-    # sample 1 has the largest error because
-    #   1. the Q values are identical for all samples
-    #   2. sample 1 has a reward -->
-    #       thus, Q_t != Q_{t_1}
-    #           (expected reward is different cuz of immediate reward)
-    assert tf.argmax(Q_err).numpy() == 1
-    print(Q_t)
-    print(Y_t)
-
-
-    # TODO: is there a more thorough test?
-    # something inspired by cartpole?
-    #   
+    Returns:
+        tf.Tensor: Q error
+        tf.Tensor: Y_t = target
+            both have shape = batch_size
+    """
+    max_a, _ = _greedy_select(selection_model, num_action, state_t1)
+    # evaluate --> max_a[ Q(t+1) ] using eval model
+    max_q_t1 = tf.stop_gradient(eval_model(tf.one_hot(max_a, num_action), state_t1))
+    return calc_q_error(selection_model(action_t, state_t),
+                        max_q_t1, reward_t1, gamma)
