@@ -19,11 +19,17 @@ class RunData:
     # typically one-hots
     actions: np.ndarray
     rewards: np.ndarray
+    termination: np.ndarray
 
 
 class Agent(ABC):
 
-    def select_action(self, state: List[np.ndarray]):
+    def init_action(self):
+        """Initial action agent should take
+        """
+        pass
+
+    def select_action(self, state: List[np.ndarray], debug: bool):
         """select 
 
         Args:
@@ -36,7 +42,7 @@ class Agent(ABC):
         """
         pass
 
-    def train(self, run_data: RunData, num_epoch: int):
+    def train(self, run_data: RunData, num_epoch: int, debug: bool):
         """train agent on run data
 
         Args:
