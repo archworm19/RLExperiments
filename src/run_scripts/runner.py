@@ -1,9 +1,8 @@
 """Running Gym Simulations"""
-
 import gymnasium as gym
 import numpy as np
 import numpy.random as npr
-
+from typing import List
 from frameworks.agent import Agent, RunData
 
 
@@ -29,7 +28,7 @@ def runner(env: gym.Env,
     action = agent.init_action()
     state0 = env.step(init_action)[0]
     cur_state = state0
-    obs, actions, rewards, other = [state0], [], [], []
+    obs, actions, rewards, termination = [state0], [], [], []
     for _ in range(max_step):
         action = agent.select_action([cur_state], debug=debug)
         step_output = env.step(action)
@@ -37,7 +36,7 @@ def runner(env: gym.Env,
         obs.append(cur_state)
         actions.append(action)
         rewards.append(step_output[1])
-        other.append(step_output[2:])
+        termination.append(step_output[2])
 
         if debug:
             input("cont?")
@@ -52,7 +51,8 @@ def runner(env: gym.Env,
                    np.array(obs[1:]),
                    # TODO: hack...
                    _one_hot(np.array(actions), agent.num_actions),
-                   np.array(rewards))
+                   np.array(rewards),
+                   np.array(termination) * 1)
 
 
 # epochs
@@ -62,26 +62,18 @@ def run_epoch(env: gym.Env,
               agent: Agent,
               struct: RunData,
               max_step: int,
-              run_iters: int,
-              p: float, rng: npr.Generator,
-              termination_reward: float = None,
+              seeds: List,
+              run_train: bool = True,
               debug: float = False):
-    # samping/processing wrapper for run output
-    def sample(v: RunData):
-        sel = rng.random(np.shape(v.states)[0]) <= p
-        # TODO: this is lazy
-        if termination_reward is not None:
-            v.rewards[-1] = termination_reward
-        return RunData(v.states[sel], v.states_t1[sel],
-                       v.actions[sel], v.rewards[sel])
-
-    for z in range(run_iters - 1):
-        env.reset(seed=z)  # TODO: expose this as arg
-        add_struct = sample(runner(env, agent, max_step))
+    for z in seeds:
+        env.reset(seed=z)
+        add_struct = runner(env, agent, max_step)
         # merge:
         struct = RunData(np.concatenate([struct.states, add_struct.states], axis=0),
                          np.concatenate([struct.states_t1, add_struct.states_t1], axis=0),
                          np.concatenate([struct.actions, add_struct.actions], axis=0),
-                         np.concatenate([struct.rewards, add_struct.rewards], axis=0))
-    agent.train(struct, 24, debug=debug)
+                         np.concatenate([struct.rewards, add_struct.rewards], axis=0),
+                         np.concatenate([struct.termination, add_struct.termination], axis=0))
+    if run_train:
+        agent.train(struct, debug=debug)
     return struct

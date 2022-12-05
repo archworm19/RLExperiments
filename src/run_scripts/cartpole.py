@@ -18,12 +18,10 @@ if __name__ == "__main__":
     agent = build_dense_qagent(num_actions=2, num_observations=4,
                                layer_sizes=[32, 16],
                                drop_rate=0.)
-    agent.rand_act_prob = 0.25  # will decay this down over time
+    agent.rand_act_prob = 0.25
     rap_decay_rate = 1.
-    # NOTE: if this is greater than max run length (250)
-    #       termination reward won't work properly
-    #       TODO: make termination reward more general
     run_length = 200
+    seeds = [i for i in range(5)]
 
     # render modes:
     #   None(default): no render
@@ -31,11 +29,11 @@ if __name__ == "__main__":
     #   "rgb_array", "ansi", and a few others
     env_run = gym.make("CartPole-v1")
     env_disp = gym.make("CartPole-v1", render_mode="human")
+
     struct = None
-    for _ in range(100):
-        print("Run Epoch")
+    for i in range(20):
         # display
-        for z in range(3):
+        for z in seeds:
             env_disp.reset(seed=z)
             s0 = runner(env_disp, agent, run_length,
                         debug=False)
@@ -43,18 +41,21 @@ if __name__ == "__main__":
             if struct is None:
                 struct = s0
 
-        # train
-        struct = run_epoch(env_run, agent, struct,
-                           run_length, 200, .25, npr.default_rng(42),
-                           termination_reward=-1.,  # NOTE: this is key
-                           debug=False)
-        # purge struct:
-        num_purge = np.shape(struct.rewards)[0] - 100000
-        if num_purge > 0:
-            struct = RunData(struct.states[num_purge:],
-                             struct.states_t1[num_purge:],
-                             struct.actions[num_purge:],
-                             struct.rewards[num_purge:])
+        for j in range(100):
+            # train
+            struct = run_epoch(env_run, agent, struct,
+                            run_length, seeds,
+                            debug=False)
+
+            # purge struct:
+            # TODO: move and stabilize
+            num_purge = np.shape(struct.rewards)[0] - 10000
+            if num_purge > 0:
+                struct = RunData(struct.states[-num_purge:],
+                                struct.states_t1[-num_purge:],
+                                struct.actions[-num_purge:],
+                                struct.rewards[-num_purge:],
+                                struct.termination[-num_purge:])
 
         # decay:
         agent.rand_act_prob *= rap_decay_rate

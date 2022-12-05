@@ -27,6 +27,8 @@ def build_dense_qagent(num_actions: int = 4,
                        num_observations: int = 8,
                        embed_dim: int = 4,
                        layer_sizes: List[int] = [32, 16],
-                       drop_rate: float = 0.1):
+                       drop_rate: float = 0.1,
+                       gamma: float = 0.6):
     return QAgent(DenseScalar(embed_dim, layer_sizes, drop_rate),
-                  num_actions, num_observations)
+                  DenseScalar(embed_dim, layer_sizes, drop_rate),
+                  num_actions, num_observations, gamma=gamma)
