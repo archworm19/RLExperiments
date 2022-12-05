@@ -49,7 +49,7 @@ class TestQL(TestCase):
         # --> max_a[Q(t+1)] = 1 for each sample
         # --> target = 0 + gamma * 1
         # if feed in action = 0 --> error = gamma^2
-        qerr, yt = calc_q_error_sm(self.model0, self.model0,
+        qerr, yt = calc_q_error_sm(self.model0, self.model0, self.model0,
                                    action_t,
                                    reward_t1,
                                    state_t,
@@ -65,7 +65,7 @@ class TestQL(TestCase):
         # different model (with 0 reward)
         # --> max_a[Q(t+1)] = 0 for each sample
         # --> target = 0 + gamma * 0
-        qerr, yt = calc_q_error_sm(self.model0, self.model1,
+        qerr, yt = calc_q_error_sm(self.model0, self.model0, self.model1,
                                    action_t,
                                    reward_t1,
                                    state_t,
