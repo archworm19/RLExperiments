@@ -25,9 +25,9 @@ class QAgent(Agent):
                  num_actions: int,
                  state_dims: int,
                  rand_act_prob: float = 0.25,
-                 gamma: float = 0.95,
-                 tau: float = 0.05,
-                 batch_size: int = 32,
+                 gamma: float = 0.7,
+                 tau: float = 0.01,
+                 batch_size: int = 128,
                  num_batch_sample: int = 1):
         # TODO: eval_model and selection_model must be the same
         # underlying model (with different weights)
@@ -72,12 +72,16 @@ class QAgent(Agent):
                   tf.keras.Input(shape=(state_dims,),
                                  name="state", dtype=tf.float32),
                   tf.keras.Input(shape=(state_dims,),
-                                 name="state_t1", dtype=tf.float32),]
+                                 name="state_t1", dtype=tf.float32),
+                  tf.keras.Input(shape=(),
+                                 name="termination", dtype=tf.float32)]
         # need to duplicate losses and models to be able to switch
         Q_err, _ = calc_q_error_sm(self.eval_model,
                                    self.selection_model,
                                    self.eval_model,
-                                   inputs[0], inputs[1], [inputs[2]], [inputs[2]],
+                                   inputs[0], inputs[1],
+                                   [inputs[2]], [inputs[3]],
+                                   inputs[4],
                                    self.num_actions, self.gamma)       
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
@@ -123,7 +127,8 @@ class QAgent(Agent):
         dmap = {"action": run_data.actions,
                 "reward": run_data.rewards,
                 "state": run_data.states,
-                "state_t1": run_data.states_t1}
+                "state_t1": run_data.states_t1,
+                "termination": run_data.termination}
         dset = tf.data.Dataset.from_tensor_slices(dmap)
         return dset
 
@@ -133,7 +138,8 @@ class QAgent(Agent):
         return RunData(run_data.states[inds],
                        run_data.states_t1[inds],
                        run_data.actions[inds],
-                       run_data.rewards[inds])
+                       run_data.rewards[inds],
+                       run_data.termination[inds])
 
     def _copy_model(self, debug: bool = False):
         # copy weights from eval_model to selection_model

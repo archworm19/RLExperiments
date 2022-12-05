@@ -35,8 +35,9 @@ def _fake_data_reward_button(num_samples: int = 5000,
     # --> one-hot
     actions = np.vstack((action0, 1. - action0)).T
     rewards = action0 * r
+    terms = np.zeros((num_samples,))
     dat = RunData(states[:-1], states[1:], actions[:-1],
-                  rewards[:-1])
+                  rewards[:-1], terms[:-1])
     return dat
 
 
