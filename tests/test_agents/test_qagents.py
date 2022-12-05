@@ -43,12 +43,16 @@ def _fake_data_reward_button(num_samples: int = 5000,
 class TestDQN(TestCase):
 
     def setUp(self) -> None:
-        self.QA = QAgent(DenseScalar(), 2, 2,
-                         gamma=0.9)
+        self.QA = QAgent(DenseScalar(), DenseScalar(),
+                         2, 2,
+                         gamma=0.9,
+                         num_batch_sample=1,
+                         batch_size=128,
+                         tau=0.01)
 
     def test_dset_build(self):
         dat = _fake_data_reward_button(100)
-        dset = self.QA._build_dset(dat)
+        dset = self.QA._build_dset(dat).batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
             self.assertTrue(tf.reduce_all(tf.shape(v["state"]) ==
@@ -60,7 +64,9 @@ class TestDQN(TestCase):
     def test_reward_button(self):
         r = 2.
         dat = _fake_data_reward_button(5000, r=r)
-        self.QA.train(dat, 15)
+        # train each model a few times
+        for z in range(1000):
+            self.QA.train(dat, debug=True)
         # expectation?
         # Q learning: Q(t) = r_{t+1} + gamma * max_{a} [ Q(t+1) ]
         #       with 'reward button' --> can get reward in any state
@@ -78,14 +84,14 @@ class TestDQN(TestCase):
         #   which Q learning is built
         exp_q = r * 1. / (1. - self.QA.gamma)
 
-        for v in self.QA._build_dset(dat):
+        for v in self.QA._build_dset(dat).batch(32):
             rews = v["reward"].numpy()
-            q = self.QA.scalar_model(v["action"], [v["state"]]).numpy()
+            q = self.QA.eval_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
             print(q)
-            self.assertAlmostEqual(exp_q, q_rew, places=2)
-            self.assertAlmostEqual(exp_q - r, q_no, places=2)
+            self.assertAlmostEqual(exp_q, q_rew, places=1)
+            self.assertAlmostEqual(exp_q - r, q_no, places=1)
             break
 
 

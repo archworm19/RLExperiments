@@ -73,7 +73,8 @@ def _greedy_select(selection_model: Layer,
     return max_a, qsels
 
 
-def calc_q_error_sm(selection_model: Layer,
+def calc_q_error_sm(q_model: Layer,
+                    selection_model: Layer,
                     eval_model: Layer,
                     action_t: tf.Tensor,
                     reward_t1: tf.Tensor,
@@ -91,13 +92,12 @@ def calc_q_error_sm(selection_model: Layer,
             > evaluation: calculate max_a[Q(t+1)]
                 using the evaluation model
 
-        NOTE: Q(t) is calculated from the selection model
-            TODO: is this right?
-
     Args:
-        selection_model (Layer): model that selects action
+        q_model (Layer): model that outputs Q(a_t, s_t)
+        selection_model (Layer): model that selects action a'
         eval_model (Layer): model that calculates Q values for selected action
-            scalar_model assumption:
+            = Q(a', s_{t+1})
+            scalar_model assumption ~ applies to q/selection/eval models:
                 call has the following signature:
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
         action_t (tf.Tensor): action at time t
@@ -116,6 +116,6 @@ def calc_q_error_sm(selection_model: Layer,
     """
     max_a, _ = _greedy_select(selection_model, num_action, state_t1)
     # evaluate --> max_a[ Q(t+1) ] using eval model
-    max_q_t1 = tf.stop_gradient(eval_model(tf.one_hot(max_a, num_action), state_t1))
-    return calc_q_error(selection_model(action_t, state_t),
-                        max_q_t1, reward_t1, gamma)
+    max_q_t1 = eval_model(tf.one_hot(max_a, num_action), state_t1)
+    q_t = q_model(action_t, state_t)
+    return calc_q_error(q_t, max_q_t1, reward_t1, gamma)

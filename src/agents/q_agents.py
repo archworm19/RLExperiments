@@ -18,19 +18,23 @@ from agents.utils import build_action_probes
 
 class QAgent(Agent):
     # double DQN
-    # stateful: switches active model at the end of each train call
 
     def __init__(self,
-                 model0: Layer,
-                 model1: Layer,
+                 eval_model: Layer,
+                 selection_model: Layer,
                  num_actions: int,
                  state_dims: int,
+                 rand_act_prob: float = 0.25,
                  gamma: float = 0.95,
-                 rand_act_prob: float = 0.25):
+                 tau: float = 0.05,
+                 batch_size: int = 32,
+                 num_batch_sample: int = 1):
+        # TODO: eval_model and selection_model must be the same
+        # underlying model (with different weights)
+        # TODO/FIX: take in builder instead
         """
         Args:
-            model0 (Layer):
-            model1 (Layer):
+            eval/selection model (Layer):
                 scalar_models
                 keras layers with the following call signature
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
@@ -40,17 +44,26 @@ class QAgent(Agent):
             state_dims (int): number of dimensions in state
                 assumes state can be easily represented by
                 single tensor
+            rand_act_prob (float): probability of selecting a random action
             gamma (float): discount factor
+            tau (float): update rate
+                after training eval, eval weights are copied to selection
+                where update follows selection <- tau * eval + (1 - tau) * selection
+            batch_size (int):
+            num_batch_sample (int):
+                number of batches to sample for a given training step
+
         """
         super(QAgent, self).__init__()
-        self.model0 = model0
-        self.model1 = model1
+        self.eval_model = eval_model
+        self.selection_model = selection_model
         self.num_actions = num_actions
         self.rand_act_prob = rand_act_prob
         self.gamma = gamma
+        self.tau = tau
+        self.batch_size = batch_size
+        self.num_batch_sample = num_batch_sample
         self.rng = npr.default_rng(42)
-        self.active_model_idx = 0
-        self.modelz = [self.model0, self.model1]
 
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
@@ -61,22 +74,15 @@ class QAgent(Agent):
                   tf.keras.Input(shape=(state_dims,),
                                  name="state_t1", dtype=tf.float32),]
         # need to duplicate losses and models to be able to switch
-        Q_err0, _ = calc_q_error_sm(self.model0, self.model1,
-                                    inputs[0], inputs[1], inputs[2], inputs[2],
-                                    self.num_actions, self.gamma)
-        Q_err1, _ = calc_q_error_sm(self.model1, self.model0,
-                                    inputs[0], inputs[1], inputs[2], inputs[2],
-                                    self.num_actions, self.gamma)        
-        self.kmodel0 = CustomModel("loss",
+        Q_err, _ = calc_q_error_sm(self.eval_model,
+                                   self.selection_model,
+                                   self.eval_model,
+                                   inputs[0], inputs[1], [inputs[2]], [inputs[2]],
+                                   self.num_actions, self.gamma)       
+        self.kmodel = CustomModel("loss",
                                   inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_mean(Q_err0)})
-        self.kmodel0.compile(tf.keras.optimizers.RMSprop(.01))
-        self.kmodel1 = CustomModel("loss",
-                                  inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_mean(Q_err1)})
-        self.kmodel1.compile(tf.keras.optimizers.RMSprop(.01))
-        self.kmodelz = [self.kmodel0, self.kmodel1]
-
+                                  outputs={"loss": tf.math.reduce_mean(Q_err)})
+        self.kmodel.compile(tf.keras.optimizers.RMSprop(.001))
 
     def init_action(self):
         return self.rng.integers(0, self.num_actions)
@@ -100,7 +106,7 @@ class QAgent(Agent):
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
         # --> shape = num_actions
-        scores = self.modelz[self.active_model_idx](action_t, state_t)
+        scores = self.selection_model(action_t, state_t)
 
         if debug:
             print('action; state; scores')
@@ -119,18 +125,42 @@ class QAgent(Agent):
                 "state": run_data.states,
                 "state_t1": run_data.states_t1}
         dset = tf.data.Dataset.from_tensor_slices(dmap)
-        return dset.shuffle(1000000).batch(128)
+        return dset
 
-    def train(self, run_data: RunData, num_epoch: int, debug: bool = False):
+    def _draw_sample(self, run_data: RunData):
+        inds = self.rng.integers(0, np.shape(run_data.actions)[0],
+                                 self.num_batch_sample * self.batch_size)
+        return RunData(run_data.states[inds],
+                       run_data.states_t1[inds],
+                       run_data.actions[inds],
+                       run_data.rewards[inds])
+
+    def _copy_model(self, debug: bool = False):
+        # copy weights from eval_model to selection_model
+        # according to: selection <- tau * eval + (1 - tau) * selection
+        sel_weights = self.selection_model.get_weights()
+        ev_weights = self.eval_model.get_weights()
+        new_weights = []
+        diffs = []
+        for sel, ev in zip(sel_weights, ev_weights):
+            new_weights.append(self.tau * ev + (1. - self.tau) * sel)
+            if debug:
+                diffs.append(np.sum((ev - sel)**2.))
+        if debug:
+            print(np.sum(diffs))
+        self.selection_model.set_weights(new_weights)
+
+    def train(self, run_data: RunData,
+              debug: bool = False):
+        # TODO: copy over eval_model weights to selection_model
         """train agent on run data
 
         Args:
             run_data (RunData):
-            num_epoch (int):
         """
-        dset = self._build_dset(run_data)
-        history = self.kmodelz[self.active_model_idx].fit(dset,
-                                                          epochs=num_epoch)
-        # stateful
-        self.active_model_idx = 1 - self.active_model_idx
+        sample_data = self._draw_sample(run_data)
+        dset = self._build_dset(sample_data)
+        history = self.kmodel.fit(dset.batch(self.batch_size),
+                                  epochs=1)
+        self._copy_model(debug=debug)
         return history
