@@ -80,6 +80,7 @@ def calc_q_error_sm(q_model: Layer,
                     reward_t1: tf.Tensor,
                     state_t: List[tf.Tensor],
                     state_t1: List[tf.Tensor],
+                    termination: tf.Tensor,
                     num_action: int,
                     gamma: float):
     """Calculate the Q error given 2 scalar models
@@ -105,6 +106,9 @@ def calc_q_error_sm(q_model: Layer,
         state_t (List[tf.Tensor]): state at time t
         state_t1 (List[tf.Tensor]): state at time t+1
             state_t + actiom_t --> reward_t1, state_t1 
+        termination (tf.Tensor): binary array indicating whether
+            samples is a terminal bit
+            shape = batch_size
         num_actions (int): number of actions available to agent
             only works for discrete action space
         gamma (float): q learning discount factor
@@ -117,5 +121,9 @@ def calc_q_error_sm(q_model: Layer,
     max_a, _ = _greedy_select(selection_model, num_action, state_t1)
     # evaluate --> max_a[ Q(t+1) ] using eval model
     max_q_t1 = eval_model(tf.one_hot(max_a, num_action), state_t1)
+    # termination:
+    # if not term --> max_a[ Q(t+1)]
+    # else --> 0
+    max_q_t1 = (1. - termination) * max_q_t1
     q_t = q_model(action_t, state_t)
     return calc_q_error(q_t, max_q_t1, reward_t1, gamma)

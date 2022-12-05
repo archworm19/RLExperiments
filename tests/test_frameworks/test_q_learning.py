@@ -43,6 +43,7 @@ class TestQL(TestCase):
         state_t = [tf.zeros(batch_size)]
         state_t1 = [tf.zeros(batch_size)]
         action_t = tf.constant([[0, 0, 1] * batch_size], dtype=tf.float32)
+        terminatiion = tf.zeros(batch_size)
         num_action = 3
 
         # same model (within reward = 0)
@@ -54,6 +55,7 @@ class TestQL(TestCase):
                                    reward_t1,
                                    state_t,
                                    state_t1,
+                                   terminatiion,
                                    num_action,
                                    gamma)
         # 100 = precision
@@ -70,6 +72,7 @@ class TestQL(TestCase):
                                    reward_t1,
                                    state_t,
                                    state_t1,
+                                   terminatiion,
                                    num_action,
                                    gamma)
         self.assertTrue(tf.math.reduce_all(tf.round(100 * qerr) ==
