@@ -1,9 +1,12 @@
+import numpy as np
+import numpy.random as npr
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Layer
 from arch_layers.simple_networks import DenseNetwork
 from typing import List
 
-from agents.q_agents import QAgent
+from frameworks.agent import RunData
+from agents.q_agents import QAgent, RunIface
 
 
 class DenseScalar(Layer):
@@ -29,6 +32,22 @@ def build_dense_qagent(num_actions: int = 4,
                        layer_sizes: List[int] = [32, 16],
                        drop_rate: float = 0.1,
                        gamma: float = 0.6):
-    return QAgent(DenseScalar(embed_dim, layer_sizes, drop_rate),
-                  DenseScalar(embed_dim, layer_sizes, drop_rate),
+    rng = npr.default_rng(42)
+    eval_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
+    selection_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
+    run_iface = RunIface(eval_model, num_actions, 0.25, rng)
+    return QAgent(run_iface,
+                  eval_model, selection_model,
+                  rng,
                   num_actions, num_observations, gamma=gamma)
+
+
+def purge_run_data(struct: RunData, max_len: int):
+    # keep the last [max_len] elements of run_dat
+    if np.shape(struct.states)[0] > max_len:
+        return RunData(struct.states[-max_len:],
+                       struct.states_t1[-max_len:],
+                       struct.actions[-max_len:],
+                       struct.rewards[-max_len:],
+                       struct.termination[-max_len:])
+    return struct

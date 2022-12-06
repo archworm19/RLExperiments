@@ -6,7 +6,7 @@ from typing import List
 from unittest import TestCase
 from tensorflow.keras.layers import Dense, Layer
 from frameworks.agent import RunData
-from agents.q_agents import QAgent
+from agents.q_agents import QAgent, RunIface
 from arch_layers.simple_networks import DenseNetwork
 
 
@@ -44,16 +44,19 @@ def _fake_data_reward_button(num_samples: int = 5000,
 class TestDQN(TestCase):
 
     def setUp(self) -> None:
-        self.QA = QAgent(DenseScalar(), DenseScalar(),
+        eval_model = DenseScalar()
+        rng = npr.default_rng(42)
+        run_iface = RunIface(eval_model, 2, 0.25, rng)
+        self.QA = QAgent(run_iface,
+                         eval_model, DenseScalar(),
+                         rng,
                          2, 2,
                          gamma=0.9,
-                         num_batch_sample=1,
-                         batch_size=128,
-                         tau=0.01)
+                         tau=.05)
 
     def test_dset_build(self):
         dat = _fake_data_reward_button(100)
-        dset = self.QA._build_dset(dat).batch(32)
+        dset = self.QA.run_iface.build_dset(dat).batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
             self.assertTrue(tf.reduce_all(tf.shape(v["state"]) ==
@@ -85,7 +88,7 @@ class TestDQN(TestCase):
         #   which Q learning is built
         exp_q = r * 1. / (1. - self.QA.gamma)
 
-        for v in self.QA._build_dset(dat).batch(32):
+        for v in self.QA.run_iface.build_dset(dat).batch(128):
             rews = v["reward"].numpy()
             q = self.QA.eval_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])

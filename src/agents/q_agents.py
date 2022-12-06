@@ -16,19 +16,90 @@ from frameworks.custom_model import CustomModel
 from agents.utils import build_action_probes
 
 
+class RunIface:
+    # handles interfacing with simulation
+    # build other models on top of this
+
+    def __init__(self, action_model: Layer,
+                 num_actions: int, rand_act_prob: float,
+                 rng: npr.Generator,
+                 num_batch_sample: int = 1,
+                 batch_size: int = 128):
+        self.action_model = action_model
+        self.num_actions = num_actions
+        self.rand_act_prob = rand_act_prob
+        self.num_batch_sample = num_batch_sample
+        self.batch_size = batch_size
+        self.rng = rng
+
+    def init_action(self):
+        return self.rng.integers(0, self.num_actions)
+
+    def select_action(self, state: List[np.ndarray], debug: bool = False):
+        """greedy action selection
+
+        Args:
+            state (List[np.ndarray]): set of unbatched input tensors
+                each with shape:
+                    ...
+
+        Returns:
+            int: index of selected action
+        """
+        if self.rng.random() < self.rand_act_prob:
+            if debug:
+                print("rand select")
+            return self.rng.integers(0, self.num_actions)
+        # --> action_t = num_actions x num_actions
+        # --> state_t = num_actions x ...
+        action_t, state_t = build_action_probes(state, self.num_actions)
+        # --> shape = num_actions
+        # TODO: not sure which model should be used here?!
+        scores = self.action_model(action_t, state_t)
+
+        if debug:
+            print('action; state; scores')
+            print(action_t)
+            print(state_t)
+            print(scores)
+            print(tf.argmax(scores).numpy())
+
+        # greedy
+        return tf.argmax(scores).numpy()
+
+    def build_dset(self, run_data: RunData):
+        # NOTE: keys must match keras input names
+        dmap = {"action": run_data.actions,
+                "reward": run_data.rewards,
+                "state": run_data.states,
+                "state_t1": run_data.states_t1,
+                "termination": run_data.termination}
+        dset = tf.data.Dataset.from_tensor_slices(dmap)
+        return dset
+
+    def draw_sample(self, run_data: RunData):
+        inds = self.rng.integers(0, np.shape(run_data.actions)[0],
+                                 self.num_batch_sample * self.batch_size)
+        return RunData(run_data.states[inds],
+                       run_data.states_t1[inds],
+                       run_data.actions[inds],
+                       run_data.rewards[inds],
+                       run_data.termination[inds])
+
+
 class QAgent(Agent):
     # double DQN
 
     def __init__(self,
+                 run_iface: RunIface,
                  eval_model: Layer,
                  selection_model: Layer,
+                 rng: npr.Generator,
                  num_actions: int,
                  state_dims: int,
-                 rand_act_prob: float = 0.25,
                  gamma: float = 0.7,
                  tau: float = 0.01,
-                 batch_size: int = 128,
-                 num_batch_sample: int = 1):
+                 batch_size: int = 128):
         # TODO: eval_model and selection_model must be the same
         # underlying model (with different weights)
         # TODO/FIX: take in builder instead
@@ -52,18 +123,16 @@ class QAgent(Agent):
             batch_size (int):
             num_batch_sample (int):
                 number of batches to sample for a given training step
-
         """
         super(QAgent, self).__init__()
+        self.run_iface = run_iface
         self.eval_model = eval_model
         self.selection_model = selection_model
         self.num_actions = num_actions
-        self.rand_act_prob = rand_act_prob
         self.gamma = gamma
         self.tau = tau
         self.batch_size = batch_size
-        self.num_batch_sample = num_batch_sample
-        self.rng = npr.default_rng(42)
+        self.rng = rng
 
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
@@ -89,7 +158,7 @@ class QAgent(Agent):
         self.kmodel.compile(tf.keras.optimizers.RMSprop(.001))
 
     def init_action(self):
-        return self.rng.integers(0, self.num_actions)
+        return self.run_iface.init_action()
 
     def select_action(self, state: List[np.ndarray], debug: bool = False):
         """greedy action selection
@@ -102,44 +171,7 @@ class QAgent(Agent):
         Returns:
             int: index of selected action
         """
-        if self.rng.random() < self.rand_act_prob:
-            if debug:
-                print("rand select")
-            return self.rng.integers(0, self.num_actions)
-        # --> action_t = num_actions x num_actions
-        # --> state_t = num_actions x ...
-        action_t, state_t = build_action_probes(state, self.num_actions)
-        # --> shape = num_actions
-        scores = self.selection_model(action_t, state_t)
-
-        if debug:
-            print('action; state; scores')
-            print(action_t)
-            print(state_t)
-            print(scores)
-            print(tf.argmax(scores).numpy())
-
-        # greedy
-        return tf.argmax(scores).numpy()
-
-    def _build_dset(self, run_data: RunData):
-        # NOTE: keys must match keras input names
-        dmap = {"action": run_data.actions,
-                "reward": run_data.rewards,
-                "state": run_data.states,
-                "state_t1": run_data.states_t1,
-                "termination": run_data.termination}
-        dset = tf.data.Dataset.from_tensor_slices(dmap)
-        return dset
-
-    def _draw_sample(self, run_data: RunData):
-        inds = self.rng.integers(0, np.shape(run_data.actions)[0],
-                                 self.num_batch_sample * self.batch_size)
-        return RunData(run_data.states[inds],
-                       run_data.states_t1[inds],
-                       run_data.actions[inds],
-                       run_data.rewards[inds],
-                       run_data.termination[inds])
+        return self.run_iface.select_action(state, debug=debug)
 
     def _copy_model(self, debug: bool = False):
         # copy weights from eval_model to selection_model
@@ -158,14 +190,13 @@ class QAgent(Agent):
 
     def train(self, run_data: RunData,
               debug: bool = False):
-        # TODO: copy over eval_model weights to selection_model
         """train agent on run data
 
         Args:
             run_data (RunData):
         """
-        sample_data = self._draw_sample(run_data)
-        dset = self._build_dset(sample_data)
+        sample_data = self.run_iface.draw_sample(run_data)
+        dset = self.run_iface.build_dset(sample_data)
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=1)
         self._copy_model(debug=debug)
