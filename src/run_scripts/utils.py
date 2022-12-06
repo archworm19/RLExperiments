@@ -39,7 +39,8 @@ def build_dense_qagent(num_actions: int = 4,
     return QAgent(run_iface,
                   eval_model, selection_model,
                   rng,
-                  num_actions, num_observations, gamma=gamma)
+                  num_actions, num_observations, gamma=gamma,
+                  tau=.05)
 
 
 def purge_run_data(struct: RunData, max_len: int):

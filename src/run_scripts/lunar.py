@@ -14,7 +14,7 @@ if __name__ == "__main__":
                                drop_rate=0.)
     agent.rand_act_prob = 0.25
     rap_decay_rate = 1.
-    run_length = 200
+    run_length = 400
     seeds = [i for i in range(5)]
 
     # render modes:
