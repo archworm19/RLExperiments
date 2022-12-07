@@ -31,10 +31,10 @@ class DefaultParams:
 
 class Envs(Enum):
     cartpole = (EnvConfig("CartPole-v1", 2, 4),
-                DefaultParams(0.6, 0.1, 2,
+                DefaultParams(0.8, 0.1, 4,
                               1, 1))
     lunar = (EnvConfig("LunarLander-v2", 4, 8),
-             DefaultParams(0.6, 0.1, 2,
+             DefaultParams(0.8, 0.1, 4,
                            1, 1))
 
 
