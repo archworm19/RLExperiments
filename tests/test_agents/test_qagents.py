@@ -71,6 +71,7 @@ class TestDQN(TestCase):
         # train each model a few times
         for z in range(200):
             self.QA.train(dat, debug=True)
+            self.QA._copy_model()
         # expectation?
         # Q learning: Q(t) = r_{t+1} + gamma * max_{a} [ Q(t+1) ]
         #       with 'reward button' --> can get reward in any state
