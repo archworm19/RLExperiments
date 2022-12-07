@@ -7,6 +7,8 @@ import numpy as np
 import numpy.random as npr
 from dataclasses import dataclass
 from enum import Enum
+from multiprocessing import Pool
+from functools import partial
 from frameworks.agent import RunData, Agent
 
 from run_scripts.runner import runner
@@ -120,11 +122,57 @@ def run_and_train(env_config: EnvConfig,
     return rews
 
 
+def build_and_run(params: DefaultParams,
+                env_config: EnvConfig,
+                run_length: int,
+                num_runs: int):
+    agent = build_dense_qagent(num_actions=env_config.num_actions,
+                            num_observations=env_config.num_obs,
+                            layer_sizes=[64, 32],
+                            drop_rate=0.05,
+                            gamma=params.gamma,
+                            tau=params.tau,
+                            num_batch_sample=params.num_batch_sample)
+    rews = run_and_train(env_config, params, agent,
+                    run_length=run_length, num_runs=num_runs,
+                    show_progress=False)
+    return np.sum(rews)
+
+
+def param_search_random(env_config: EnvConfig,
+                        params_lb: DefaultParams,
+                        params_ub: DefaultParams,
+                        num_rand: int = 40,
+                        run_length: int = 200,
+                        num_runs: int = 300):
+    def sel_param(v_lo, v_hi):
+        return v_lo + (v_hi - v_lo) * npr.random()
+
+    # TODO: this will not generalize!
+    def gen_params(p_lo: DefaultParams, p_hi: DefaultParams):
+        return DefaultParams(sel_param(p_lo.gamma, p_hi.gamma),
+                             sel_param(p_lo.tau, p_hi.tau),
+                             int(sel_param(p_lo.num_batch_sample, p_hi.num_batch_sample)),
+                             int(sel_param(p_lo.run_per_train, p_hi.run_per_train)),
+                             int(sel_param(p_lo.run_per_copy, p_hi.run_per_copy)))
+    # generate params
+    params = [gen_params(params_lb, params_ub) for _ in range(num_rand)]
+
+    with Pool(processes=4) as p:
+        rew_sums = p.map(partial(build_and_run, env_config=env_config,
+                                                run_length=run_length,
+                                                num_runs=num_runs),
+                         params)
+    return params, rew_sums
+
+
 if __name__ == "__main__":
 
     # cartpole
     (env_config, def_params) = Envs.cartpole.value
 
+    # run
+    """
     agent = build_dense_qagent(num_actions=env_config.num_actions,
                                num_observations=env_config.num_obs,
                                layer_sizes=[64, 32],
@@ -135,3 +183,15 @@ if __name__ == "__main__":
     reward_seq = run_and_train(env_config, def_params, agent,
                                run_length=300, num_runs=500)
     print(reward_seq)
+    """
+
+    # optimize
+    params_lb = DefaultParams(0.4, .01, 1, 1, 1)
+    params_ub = DefaultParams(0.99, 0.5, 8, 4, 4)
+    params, rews = param_search_random(env_config,
+                                        params_lb, params_ub,
+                                        num_rand=40,
+                                        num_runs=250)
+    max_ind = np.argmax(rews)
+    print(np.amax(rews))
+    print(params[max_ind])
