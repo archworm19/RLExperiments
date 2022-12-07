@@ -31,16 +31,19 @@ def build_dense_qagent(num_actions: int = 4,
                        embed_dim: int = 4,
                        layer_sizes: List[int] = [32, 16],
                        drop_rate: float = 0.1,
-                       gamma: float = 0.6):
+                       gamma: float = 0.6,
+                       num_batch_sample: int = 1,
+                       tau: float = 0.15):
     rng = npr.default_rng(42)
     eval_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
     selection_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
-    run_iface = RunIface(eval_model, num_actions, 0.25, rng)
+    run_iface = RunIface(eval_model, num_actions, 1., rng)
     return QAgent(run_iface,
                   eval_model, selection_model,
                   rng,
                   num_actions, num_observations, gamma=gamma,
-                  tau=.05)
+                  tau=tau,
+                  num_batch_sample=num_batch_sample)
 
 
 def purge_run_data(struct: RunData, max_len: int):

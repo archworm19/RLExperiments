@@ -22,14 +22,10 @@ class RunIface:
 
     def __init__(self, action_model: Layer,
                  num_actions: int, rand_act_prob: float,
-                 rng: npr.Generator,
-                 num_batch_sample: int = 1,
-                 batch_size: int = 128):
+                 rng: npr.Generator):
         self.action_model = action_model
         self.num_actions = num_actions
         self.rand_act_prob = rand_act_prob
-        self.num_batch_sample = num_batch_sample
-        self.batch_size = batch_size
         self.rng = rng
 
     def init_action(self):
@@ -67,25 +63,6 @@ class RunIface:
         # greedy
         return tf.argmax(scores).numpy()
 
-    def build_dset(self, run_data: RunData):
-        # NOTE: keys must match keras input names
-        dmap = {"action": run_data.actions,
-                "reward": run_data.rewards,
-                "state": run_data.states,
-                "state_t1": run_data.states_t1,
-                "termination": run_data.termination}
-        dset = tf.data.Dataset.from_tensor_slices(dmap)
-        return dset
-
-    def draw_sample(self, run_data: RunData):
-        inds = self.rng.integers(0, np.shape(run_data.actions)[0],
-                                 self.num_batch_sample * self.batch_size)
-        return RunData(run_data.states[inds],
-                       run_data.states_t1[inds],
-                       run_data.actions[inds],
-                       run_data.rewards[inds],
-                       run_data.termination[inds])
-
 
 class QAgent(Agent):
     # double DQN
@@ -99,7 +76,8 @@ class QAgent(Agent):
                  state_dims: int,
                  gamma: float = 0.7,
                  tau: float = 0.01,
-                 batch_size: int = 128):
+                 batch_size: int = 128,
+                 num_batch_sample: int = 8):
         # TODO: eval_model and selection_model must be the same
         # underlying model (with different weights)
         # TODO/FIX: take in builder instead
@@ -132,6 +110,7 @@ class QAgent(Agent):
         self.gamma = gamma
         self.tau = tau
         self.batch_size = batch_size
+        self.num_batch_sample = num_batch_sample
         self.rng = rng
 
         inputs = [tf.keras.Input(shape=(num_actions,),
@@ -146,8 +125,8 @@ class QAgent(Agent):
                                  name="termination", dtype=tf.float32)]
         # need to duplicate losses and models to be able to switch
         Q_err, _ = calc_q_error_sm(self.eval_model,
-                                   self.selection_model,
                                    self.eval_model,
+                                   self.selection_model,
                                    inputs[0], inputs[1],
                                    [inputs[2]], [inputs[3]],
                                    inputs[4],
@@ -155,7 +134,7 @@ class QAgent(Agent):
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
-        self.kmodel.compile(tf.keras.optimizers.RMSprop(.001))
+        self.kmodel.compile(tf.keras.optimizers.Adam(.001))
 
     def init_action(self):
         return self.run_iface.init_action()
@@ -188,6 +167,16 @@ class QAgent(Agent):
             print(np.sum(diffs))
         self.selection_model.set_weights(new_weights)
 
+    def _draw_sample(self, run_data: RunData):
+        inds = self.rng.integers(0, np.shape(run_data.actions)[0],
+                                 self.num_batch_sample * self.batch_size)
+        d = {"state": run_data.states[inds],
+             "state_t1": run_data.states_t1[inds],
+             "action": run_data.actions[inds],
+             "reward": run_data.rewards[inds],
+             "termination": run_data.termination[inds]}
+        return tf.data.Dataset.from_tensor_slices(d)
+
     def train(self, run_data: RunData,
               debug: bool = False):
         """train agent on run data
@@ -195,9 +184,7 @@ class QAgent(Agent):
         Args:
             run_data (RunData):
         """
-        sample_data = self.run_iface.draw_sample(run_data)
-        dset = self.run_iface.build_dset(sample_data)
+        dset = self._draw_sample(run_data)
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=1)
-        self._copy_model(debug=debug)
         return history

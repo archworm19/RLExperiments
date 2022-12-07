@@ -82,7 +82,8 @@ def calc_q_error_sm(q_model: Layer,
                     state_t1: List[tf.Tensor],
                     termination: tf.Tensor,
                     num_action: int,
-                    gamma: float):
+                    gamma: float,
+                    stop_selection_grad: bool = True):
     """Calculate the Q error given 2 scalar models
         This is based on the idea of double Q learning
             but can be used for regular Q learning
@@ -120,7 +121,10 @@ def calc_q_error_sm(q_model: Layer,
     """
     max_a, _ = _greedy_select(selection_model, num_action, state_t1)
     # evaluate --> max_a[ Q(t+1) ] using eval model
-    max_q_t1 = eval_model(tf.one_hot(max_a, num_action), state_t1)
+    if stop_selection_grad:
+        max_q_t1 = tf.stop_gradient(eval_model(tf.one_hot(max_a, num_action), state_t1))
+    else:
+        max_q_t1 = eval_model(tf.one_hot(max_a, num_action), state_t1)
     # termination:
     # if not term --> max_a[ Q(t+1)]
     # else --> 0

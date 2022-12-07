@@ -52,11 +52,11 @@ class TestDQN(TestCase):
                          rng,
                          2, 2,
                          gamma=0.9,
-                         tau=.05)
+                         tau=.5)
 
     def test_dset_build(self):
         dat = _fake_data_reward_button(100)
-        dset = self.QA.run_iface.build_dset(dat).batch(32)
+        dset = self.QA._draw_sample(dat).batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
             self.assertTrue(tf.reduce_all(tf.shape(v["state"]) ==
@@ -69,7 +69,7 @@ class TestDQN(TestCase):
         r = 2.
         dat = _fake_data_reward_button(5000, r=r)
         # train each model a few times
-        for z in range(1000):
+        for z in range(200):
             self.QA.train(dat, debug=True)
         # expectation?
         # Q learning: Q(t) = r_{t+1} + gamma * max_{a} [ Q(t+1) ]
@@ -88,7 +88,7 @@ class TestDQN(TestCase):
         #   which Q learning is built
         exp_q = r * 1. / (1. - self.QA.gamma)
 
-        for v in self.QA.run_iface.build_dset(dat).batch(128):
+        for v in self.QA._draw_sample(dat).batch(32):
             rews = v["reward"].numpy()
             q = self.QA.eval_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])

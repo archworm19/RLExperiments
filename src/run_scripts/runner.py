@@ -1,8 +1,6 @@
 """Running Gym Simulations"""
 import gymnasium as gym
 import numpy as np
-import numpy.random as npr
-from typing import List
 from frameworks.agent import Agent, RunData
 
 
@@ -53,27 +51,3 @@ def runner(env: gym.Env,
                    _one_hot(np.array(actions), agent.num_actions),
                    np.array(rewards),
                    np.array(termination) * 1)
-
-
-# epochs
-
-
-def run_epoch(env: gym.Env,
-              agent: Agent,
-              struct: RunData,
-              max_step: int,
-              seeds: List,
-              run_train: bool = True,
-              debug: float = False):
-    for z in seeds:
-        env.reset(seed=z)
-        add_struct = runner(env, agent, max_step)
-        # merge:
-        struct = RunData(np.concatenate([struct.states, add_struct.states], axis=0),
-                         np.concatenate([struct.states_t1, add_struct.states_t1], axis=0),
-                         np.concatenate([struct.actions, add_struct.actions], axis=0),
-                         np.concatenate([struct.rewards, add_struct.rewards], axis=0),
-                         np.concatenate([struct.termination, add_struct.termination], axis=0))
-    if run_train:
-        agent.train(struct, debug=debug)
-    return struct
