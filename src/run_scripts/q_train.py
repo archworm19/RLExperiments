@@ -127,8 +127,8 @@ if __name__ == "__main__":
 
     agent = build_dense_qagent(num_actions=env_config.num_actions,
                                num_observations=env_config.num_obs,
-                               layer_sizes=[32, 16],
-                               drop_rate=0.,
+                               layer_sizes=[64, 32],
+                               drop_rate=0.05,
                                gamma=def_params.gamma,
                                tau=def_params.tau,
                                num_batch_sample=def_params.num_batch_sample)

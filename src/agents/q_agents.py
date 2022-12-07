@@ -69,47 +69,62 @@ class QAgent(Agent):
 
     def __init__(self,
                  run_iface: RunIface,
-                 eval_model: Layer,
-                 selection_model: Layer,
+                 free_model: Layer,
+                 memory_model: Layer,
                  rng: npr.Generator,
                  num_actions: int,
                  state_dims: int,
                  gamma: float = 0.7,
                  tau: float = 0.01,
                  batch_size: int = 128,
-                 num_batch_sample: int = 8):
+                 num_batch_sample: int = 8,
+                 train_epoch: int = 1):
         # TODO: eval_model and selection_model must be the same
         # underlying model (with different weights)
         # TODO/FIX: take in builder instead
         """
+        Core Bellman Eqn:
+            Q_f = free model
+            Q_m = memory model == approximates Q table
+            Q_m <- (1 - tau) * Q_m + tau * Q_f
+        Learning Q_f:
+            Find Q_f such that:
+                Q_f(s_t, a_t) approx= r_t + gamma * max_a' [ Q_m(s_{t+1}, a') ]
+                    where a' is chosen according to Q_f (double learning)
+
         Args:
-            eval/selection model (Layer):
+            run_iface (RunIface): interface that implements the
+                run strategy
+            free/memory model (Layer):
                 scalar_models
                 keras layers with the following call signature
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
                         --> tf.Tensor (with shape = batch_size)
+            rng (npr.Generator):
             num_actions (int): number of actions available to
                 the agent
             state_dims (int): number of dimensions in state
                 assumes state can be easily represented by
                 single tensor
             gamma (float): discount factor
-            tau (float): update rate
+            tau (float): update rate (often referred to as alpha in literature)
                 after training eval, eval weights are copied to selection
                 where update follows selection <- tau * eval + (1 - tau) * selection
             batch_size (int):
             num_batch_sample (int):
                 number of batches to sample for a given training step
+            train_epoch (int):
         """
         super(QAgent, self).__init__()
         self.run_iface = run_iface
-        self.eval_model = eval_model
-        self.selection_model = selection_model
+        self.free_model = free_model
+        self.memory_model = memory_model
         self.num_actions = num_actions
         self.gamma = gamma
         self.tau = tau
         self.batch_size = batch_size
         self.num_batch_sample = num_batch_sample
+        self.train_epoch = train_epoch
         self.rng = rng
 
         inputs = [tf.keras.Input(shape=(num_actions,),
@@ -123,9 +138,9 @@ class QAgent(Agent):
                   tf.keras.Input(shape=(),
                                  name="termination", dtype=tf.float32)]
         # need to duplicate losses and models to be able to switch
-        Q_err, _ = calc_q_error_sm(self.eval_model,
-                                   self.eval_model,
-                                   self.selection_model,
+        Q_err, _ = calc_q_error_sm(self.free_model,
+                                   self.free_model,
+                                   self.memory_model,
                                    inputs[0], inputs[1],
                                    [inputs[2]], [inputs[3]],
                                    inputs[4],
@@ -152,19 +167,21 @@ class QAgent(Agent):
         return self.run_iface.select_action(state, debug=debug)
 
     def _copy_model(self, debug: bool = False):
-        # copy weights from eval_model to selection_model
-        # according to: selection <- tau * eval + (1 - tau) * selection
-        sel_weights = self.selection_model.get_weights()
-        ev_weights = self.eval_model.get_weights()
+        # copy weights from free_model to memory_model
+        #   approximation of updating the Q table
+        # according to: memory <- tau * free + (1 - tau) * memory
+        #   NOTE: tau should probably be pretty small
+        free_weights = self.free_model.get_weights()
+        mem_weights = self.memory_model.get_weights()
         new_weights = []
         diffs = []
-        for sel, ev in zip(sel_weights, ev_weights):
-            new_weights.append(self.tau * ev + (1. - self.tau) * sel)
+        for mem, fr in zip(mem_weights, free_weights):
+            new_weights.append(self.tau * fr + (1. - self.tau) * mem)
             if debug:
-                diffs.append(np.sum((ev - sel)**2.))
+                diffs.append(np.sum((mem - fr)**2.))
         if debug:
             print(np.sum(diffs))
-        self.selection_model.set_weights(new_weights)
+        self.memory_model.set_weights(new_weights)
 
     def _draw_sample(self, run_data: RunData):
         inds = self.rng.integers(0, np.shape(run_data.actions)[0],
@@ -185,5 +202,5 @@ class QAgent(Agent):
         """
         dset = self._draw_sample(run_data)
         history = self.kmodel.fit(dset.batch(self.batch_size),
-                                  epochs=1)
+                                  epochs=self.train_epoch)
         return history

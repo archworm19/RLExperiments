@@ -91,7 +91,7 @@ class TestDQN(TestCase):
 
         for v in self.QA._draw_sample(dat).batch(32):
             rews = v["reward"].numpy()
-            q = self.QA.eval_model(v["action"], [v["state"]]).numpy()
+            q = self.QA.memory_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
             print(q)
