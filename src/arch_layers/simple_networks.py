@@ -13,10 +13,11 @@ class DenseNetwork(Layer):
                  output_size: int,
                  drop_rate: float = 0.):
         # use relus
+        assert output_size >= 1
         super(DenseNetwork, self).__init__()
         self.layers = [Dense(ls, activation="relu") for ls in layer_sizes]
         self.drops = [Dropout(drop_rate) for _ in layer_sizes]
-        self.output_layer = Dense(output_size)
+        self.output_layer = Dense(output_size, activation="linear")
 
     def call(self, x: tf.Tensor):
         for l, d in zip(self.layers, self.drops):

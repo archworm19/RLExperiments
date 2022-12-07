@@ -93,7 +93,6 @@ class QAgent(Agent):
             state_dims (int): number of dimensions in state
                 assumes state can be easily represented by
                 single tensor
-            rand_act_prob (float): probability of selecting a random action
             gamma (float): discount factor
             tau (float): update rate
                 after training eval, eval weights are copied to selection
