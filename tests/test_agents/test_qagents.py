@@ -5,8 +5,7 @@ import tensorflow as tf
 from typing import List
 from unittest import TestCase
 from tensorflow.keras.layers import Dense, Layer
-from frameworks.agent import RunData
-from agents.q_agents import QAgent, RunIface
+from agents.q_agents import QAgent, RunIface, MemoryBuffer
 from arch_layers.simple_networks import DenseNetwork
 
 
@@ -32,13 +31,11 @@ def _fake_data_reward_button(num_samples: int = 5000,
     rng = npr.default_rng(42)
     states = rng.random((num_samples, 2)) - 0.5
     action0 = (rng.random((num_samples,)) > 0.5) * 1
-    # --> one-hot
-    actions = np.vstack((action0, 1. - action0)).T
+    actions = action0
     rewards = action0 * r
     terms = np.zeros((num_samples,))
-    dat = RunData(states[:-1], states[1:], actions[:-1],
+    return (states[:-1], states[1:], actions[:-1],
                   rewards[:-1], terms[:-1])
-    return dat
 
 
 class TestDQN(TestCase):
@@ -47,16 +44,23 @@ class TestDQN(TestCase):
         eval_model = DenseScalar()
         rng = npr.default_rng(42)
         run_iface = RunIface(eval_model, 2, 0.25, rng)
+        mem_buff = MemoryBuffer(5000, rng)
         self.QA = QAgent(run_iface,
+                         mem_buff,
                          eval_model, DenseScalar(),
                          rng,
                          2, 2,
                          gamma=0.9,
                          tau=.5)
+        # load in data:
+        self.r = 2
+        dat = _fake_data_reward_button(100, r=self.r)
+        for i in range(len(dat[0])):
+            self.QA.save_data(dat[0][i], dat[1][i], dat[2][i],
+                              dat[3][i], dat[4][i])
 
     def test_dset_build(self):
-        dat = _fake_data_reward_button(100)
-        dset = self.QA._draw_sample(dat).batch(32)
+        dset = self.QA._draw_sample().batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
             self.assertTrue(tf.reduce_all(tf.shape(v["state"]) ==
@@ -66,11 +70,9 @@ class TestDQN(TestCase):
             break
 
     def test_reward_button(self):
-        r = 2.
-        dat = _fake_data_reward_button(5000, r=r)
         # train each model a few times
-        for z in range(200):
-            self.QA.train(dat, debug=True)
+        for _ in range(200):
+            self.QA.train()
             self.QA._copy_model()
         # expectation?
         # Q learning: Q(t) = r_{t+1} + gamma * max_{a} [ Q(t+1) ]
@@ -87,16 +89,16 @@ class TestDQN(TestCase):
         #       Q(t) = r + gamma * r + gamma^2 * r
         # in fact, this is closely related to the Bellman eqns on
         #   which Q learning is built
-        exp_q = r * 1. / (1. - self.QA.gamma)
+        exp_q = self.r * 1. / (1. - self.QA.gamma)
 
-        for v in self.QA._draw_sample(dat).batch(32):
+        for v in self.QA._draw_sample().batch(32):
             rews = v["reward"].numpy()
             q = self.QA.memory_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
             print(q)
             self.assertAlmostEqual(exp_q, q_rew, places=1)
-            self.assertAlmostEqual(exp_q - r, q_no, places=1)
+            self.assertAlmostEqual(exp_q - self.r, q_no, places=1)
             break
 
 

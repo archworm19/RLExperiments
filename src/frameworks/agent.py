@@ -1,12 +1,10 @@
 """Agent interface
     Exposes methods to allow 1. running, 2. training of an agent
 
-    KEY: all core datatypes are numpy arrays
-        models will have to convert to their desired formats
 """
 import numpy as np
 from abc import ABC
-from typing import List
+from typing import List, Union
 from dataclasses import dataclass
 
 
@@ -14,12 +12,12 @@ from dataclasses import dataclass
 class RunData:
     # TODO: for larger datasets --> this will need
     # to be changed to an interface
-    states: np.ndarray
-    states_t1: np.ndarray
+    states: List
+    states_t1: List
     # typically one-hots
-    actions: np.ndarray
-    rewards: np.ndarray
-    termination: np.ndarray
+    actions: List
+    rewards: List
+    termination: List
 
 
 class Agent(ABC):
@@ -42,14 +40,36 @@ class Agent(ABC):
         """
         pass
 
-    def train(self, run_data: RunData, num_epoch: int, debug: bool):
-        """train agent on run data
+    def train(self, num_epoch: int, debug: bool):
+        """train agent on saved data
 
         Args:
-            run_data (RunData):
             num_epoch (int):
 
         Returns:
             Dict: loss history
+        """
+        pass
+
+    def save_data(self,
+                  state: List[List[float]],
+                  state_t1: List[List[float]],
+                  action: Union[int, float, List],
+                  reward: float,
+                  termination: bool):
+        """add single entry to replay memory
+            why here? data format is hard dependency for training
+
+        Args:
+            state (List[List[float]]):
+            state_t1 (List[List[float]]):
+                outer list = all the different states
+                    could be different shapes
+                inner list = dims for given state
+            action (Union[int, float, List]): action taken
+                int for discrete; float for continuous
+                List for multi-pronged acrions
+            reward (float): reward experienced
+            termination (bool): done?
         """
         pass
