@@ -36,15 +36,15 @@ class DefaultParams:
 
 class Envs(Enum):
     cartpole = (EnvConfig("CartPole-v1", 2, 4),
-                DefaultParams(0.87, 1.,
-                              1, 32,
-                              1,
-                              5, 5))
-    lunar = (EnvConfig("LunarLander-v2", 4, 1),
+                DefaultParams(0.99, 1.,
+                              8, 128,
+                              2,
+                              10, 10))
+    lunar = (EnvConfig("LunarLander-v2", 4, 8),
              DefaultParams(0.99, 1.,
-                           1, 32,
-                           1,
-                           5, 5))
+                           16, 128,
+                           3,
+                           10, 10))
 
 
 def run_and_train(env_config: EnvConfig,
@@ -110,7 +110,7 @@ if __name__ == "__main__":
     # cartpole
     (env_config, def_params) = Envs.cartpole.value
     # lunar lander
-    # (env_config, def_params) = Envs.lunar.value
+    (env_config, def_params) = Envs.lunar.value
 
     # run
     agent = build_dense_qagent(num_actions=env_config.num_actions,
@@ -124,7 +124,7 @@ if __name__ == "__main__":
                                batch_size=def_params.batch_size)
     reward_seq = run_and_train(env_config, agent,
                                run_length=1000, num_runs=200,
-                               seed_runs=20,
+                               seed_runs=5,
                                step_per_train=def_params.step_per_train,
                                step_per_copy=def_params.step_per_copy)
     print(reward_seq)
