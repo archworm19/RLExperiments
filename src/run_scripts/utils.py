@@ -5,8 +5,7 @@ from tensorflow.keras.layers import Dense, Layer
 from arch_layers.simple_networks import DenseNetwork
 from typing import List
 
-from frameworks.agent import RunData
-from agents.q_agents import QAgent, RunIface
+from agents.q_agents import QAgent, RunIface, MemoryBuffer
 
 
 class DenseScalar(Layer):
@@ -34,26 +33,20 @@ def build_dense_qagent(num_actions: int = 4,
                        gamma: float = 0.6,
                        num_batch_sample: int = 1,
                        tau: float = 0.15,
-                       train_epoch: int = 1):
+                       train_epoch: int = 1,
+                       batch_size: int = 128,
+                       mem_buffer_size: int = 100000):
     rng = npr.default_rng(42)
     free_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
     memory_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
     run_iface = RunIface(memory_model, num_actions, 1., rng)
+    mem_buff = MemoryBuffer(mem_buffer_size, rng)
     return QAgent(run_iface,
+                  mem_buff,
                   free_model, memory_model,
                   rng,
                   num_actions, num_observations, gamma=gamma,
                   tau=tau,
                   num_batch_sample=num_batch_sample,
-                  train_epoch=train_epoch)
-
-
-def purge_run_data(struct: RunData, max_len: int):
-    # keep the last [max_len] elements of run_dat
-    if np.shape(struct.states)[0] > max_len:
-        return RunData(struct.states[-max_len:],
-                       struct.states_t1[-max_len:],
-                       struct.actions[-max_len:],
-                       struct.rewards[-max_len:],
-                       struct.termination[-max_len:])
-    return struct
+                  train_epoch=train_epoch,
+                  batch_size=batch_size)

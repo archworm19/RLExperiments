@@ -56,7 +56,7 @@ class TestDQN(TestCase):
         self.r = 2
         dat = _fake_data_reward_button(100, r=self.r)
         for i in range(len(dat[0])):
-            self.QA.save_data(dat[0][i], dat[1][i], dat[2][i],
+            self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
                               dat[3][i], dat[4][i])
 
     def test_dset_build(self):

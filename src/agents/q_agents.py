@@ -5,6 +5,7 @@
                 call has the following signature:
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
 """
+from turtle import clear
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
@@ -254,7 +255,8 @@ class QAgent(Agent):
         """
         dset = self._draw_sample()
         history = self.kmodel.fit(dset.batch(self.batch_size),
-                                  epochs=self.train_epoch)
+                                  epochs=self.train_epoch,
+                                  verbose=0)
         return history
 
     def save_data(self,
@@ -264,4 +266,5 @@ class QAgent(Agent):
                   reward: float,
                   termination: bool):
         # NOTE: only saves a single step
-        self.mem_buffer.append(state, state_t1, action, reward, termination)
+        # NOTE: only saves the 0th state group ~ will ignore other states
+        self.mem_buffer.append(state[0], state_t1[0], action, reward, termination)

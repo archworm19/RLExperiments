@@ -40,11 +40,10 @@ class Agent(ABC):
         """
         pass
 
-    def train(self, num_epoch: int, debug: bool):
+    def train(self, debug: bool):
         """train agent on saved data
 
         Args:
-            num_epoch (int):
 
         Returns:
             Dict: loss history
