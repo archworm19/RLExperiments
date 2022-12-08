@@ -50,7 +50,6 @@ class RunIface:
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
         # --> shape = num_actions
-        # TODO: not sure which model should be used here?!
         scores = self.action_model(action_t, state_t)
 
         if debug:
@@ -149,6 +148,12 @@ class QAgent(Agent):
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
+
+        # TODO: can/should I copy over here?
+        tau_hold = self.tau
+        self.tau = 1.
+        self._copy_model()
+        self.tau = tau_hold
 
     def init_action(self):
         return self.run_iface.init_action()

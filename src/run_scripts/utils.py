@@ -33,7 +33,8 @@ def build_dense_qagent(num_actions: int = 4,
                        drop_rate: float = 0.1,
                        gamma: float = 0.6,
                        num_batch_sample: int = 1,
-                       tau: float = 0.15):
+                       tau: float = 0.15,
+                       train_epoch: int = 1):
     rng = npr.default_rng(42)
     free_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
     memory_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
@@ -43,7 +44,8 @@ def build_dense_qagent(num_actions: int = 4,
                   rng,
                   num_actions, num_observations, gamma=gamma,
                   tau=tau,
-                  num_batch_sample=num_batch_sample)
+                  num_batch_sample=num_batch_sample,
+                  train_epoch=train_epoch)
 
 
 def purge_run_data(struct: RunData, max_len: int):

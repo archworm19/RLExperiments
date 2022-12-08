@@ -37,6 +37,8 @@ def runner(env: gym.Env,
         termination.append(step_output[2])
 
         if debug:
+            print("rewards")
+            print(rewards[-1])
             input("cont?")
 
         # check for termination
