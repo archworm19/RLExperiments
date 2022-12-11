@@ -5,7 +5,6 @@
                 call has the following signature:
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
 """
-from turtle import clear
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
@@ -15,6 +14,7 @@ from frameworks.agent import Agent
 from frameworks.q_learning import calc_q_error_sm
 from frameworks.custom_model import CustomModel
 from agents.utils import build_action_probes
+from replay_buffers.replay_buffs import MemoryBuffer
 
 
 def _one_hot(x: np.ndarray, num_action: int):
@@ -73,48 +73,11 @@ class RunIface:
         return tf.argmax(scores).numpy()
 
 
-class MemoryBuffer:
-
-    def __init__(self, buffer_size: int, rng: npr.Generator):
-        self.state_t = []
-        self.state_t1 = []
-        self.action = []
-        self.reward = []
-        self.termination = []
-        self.buffer_size = buffer_size
-        self.rng = rng
-
-    def append(self, state_t: List[float], state_t1: List[float],
-               action: int, reward: float, term: bool):
-        self.state_t.append(state_t)
-        self.state_t1.append(state_t1)
-        self.action.append(action)
-        self.reward.append(reward)
-        self.termination.append(term)
-        if len(self.state_t) > self.buffer_size:
-            self.state_t = self.state_t[-self.buffer_size:]
-            self.state_t1 = self.state_t1[-self.buffer_size:]
-            self.action = self.action[-self.buffer_size:]
-            self.reward = self.reward[-self.buffer_size:]
-            self.termination = self.termination[-self.buffer_size:]
-
-    def pull_sample(self, num_sample: int):
-        # returns Tuple[List]
-        inds = self.rng.integers(0, len(self.state_t), num_sample)
-        state_t = [self.state_t[z] for z in inds]
-        state_t1 = [self.state_t1[z] for z in inds]
-        action = [self.action[z] for z in inds]
-        reward = [self.reward[z] for z in inds]
-        termination = [self.termination[z] for z in inds]
-        return state_t, state_t1, action, reward, termination
-
-
 class QAgent(Agent):
     # double DQN
 
     def __init__(self,
                  run_iface: RunIface,
-                 mem_buffer: MemoryBuffer,
                  free_model: Layer,
                  memory_model: Layer,
                  rng: npr.Generator,
@@ -164,7 +127,10 @@ class QAgent(Agent):
         """
         super(QAgent, self).__init__()
         self.run_iface = run_iface
-        self.mem_buffer = mem_buffer
+        self.mem_buffer = MemoryBuffer(["action", "reward",
+                                        "state", "state_t1",
+                                        "termination"], rng,
+                                        500000)
         self.free_model = free_model
         self.memory_model = memory_model
         self.num_actions = num_actions
@@ -238,13 +204,10 @@ class QAgent(Agent):
         self.memory_model.set_weights(new_weights)
 
     def _draw_sample(self):
-        (state_t, state_t1, action, reward, term) = self.mem_buffer.pull_sample(self.num_batch_sample
-                                                                                * self.batch_size)
-        d = {"state": np.array(state_t),
-             "state_t1": np.array(state_t1),
-             "action": _one_hot(np.array(action, dtype=np.int32), self.num_actions),
-             "reward": np.array(reward),
-             "termination": np.array(term) * 1.}
+        d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
+        d = {k: np.array(d[k]) for k in d}
+        # TODO: kinda meh design
+        d["action"] = _one_hot(d["action"].astype(np.int32), self.num_actions)
         return tf.data.Dataset.from_tensor_slices(d)
 
     def train(self, debug: bool = False):
@@ -266,5 +229,9 @@ class QAgent(Agent):
                   reward: float,
                   termination: bool):
         # NOTE: only saves a single step
-        # NOTE: only saves the 0th state group ~ will ignore other states
-        self.mem_buffer.append(state[0], state_t1[0], action, reward, termination)
+        d = {"state": state[0],
+             "state_t1": state_t1[0],
+             "action": action,
+             "reward": reward,
+             "termination": termination}
+        self.mem_buffer.append(d)

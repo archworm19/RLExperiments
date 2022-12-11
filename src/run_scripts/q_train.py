@@ -110,7 +110,7 @@ if __name__ == "__main__":
     # cartpole
     (env_config, def_params) = Envs.cartpole.value
     # lunar lander
-    (env_config, def_params) = Envs.lunar.value
+    # (env_config, def_params) = Envs.lunar.value
 
     # run
     agent = build_dense_qagent(num_actions=env_config.num_actions,
