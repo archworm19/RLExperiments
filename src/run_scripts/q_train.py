@@ -45,6 +45,11 @@ class Envs(Enum):
                            16, 128,
                            3,
                            10, 10))
+    acrobot = (EnvConfig("Acrobot-v1", 3, 6),
+               DefaultParams(0.99, 1.,
+                              8, 128,
+                              2,
+                              10, 10))
 
 
 def run_and_train(env_config: EnvConfig,
@@ -97,6 +102,8 @@ def run_and_train(env_config: EnvConfig,
                             step_per_copy=step_per_copy)
         rews.append(np.sum(np.array(rewards)))
 
+        print(rews[-1])
+
         # decay:
         agent.run_iface.rand_act_prob *= rap_decay_rate
 
@@ -111,6 +118,8 @@ if __name__ == "__main__":
     (env_config, def_params) = Envs.cartpole.value
     # lunar lander
     # (env_config, def_params) = Envs.lunar.value
+    (env_config, def_params) = Envs.acrobot.value
+    run_length = 500
 
     # run
     agent = build_dense_qagent(num_actions=env_config.num_actions,
@@ -123,7 +132,7 @@ if __name__ == "__main__":
                                train_epoch=def_params.train_epoch,
                                batch_size=def_params.batch_size)
     reward_seq = run_and_train(env_config, agent,
-                               run_length=1000, num_runs=200,
+                               run_length=run_length, num_runs=200,
                                seed_runs=5,
                                step_per_train=def_params.step_per_train,
                                step_per_copy=def_params.step_per_copy)
