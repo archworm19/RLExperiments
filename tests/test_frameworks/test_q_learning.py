@@ -3,7 +3,7 @@ import tensorflow as tf
 from typing import List
 from unittest import TestCase
 from tensorflow.keras.layers import Layer
-from frameworks.q_learning import calc_q_error_sm, _greedy_select
+from frameworks.q_learning import calc_q_error_sm, _greedy_select, calc_q_error_huber
 
 
 class AModel(Layer):
@@ -15,6 +15,18 @@ class AModel(Layer):
 
     def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
         return action_t[:, self.target_idx]
+
+
+class TestHuber(TestCase):
+
+    def test_huber(self):
+        q1 = tf.constant([1., 2., 3., 4., 2.5])
+        q2 = tf.constant([3., 2. , 1., 0., 2.0])
+        reward = tf.constant([0., 0., 0., 0., 0.])
+        err, _ = calc_q_error_huber(q1, q2, reward, 1.)
+        target = tf.constant([1.5, 0., 1.5, 3.5, 0.124999])
+        self.assertTrue(tf.math.reduce_all(tf.round(100 * err) ==
+                                           tf.round(100 * target)))
 
 
 class TestQL(TestCase):
@@ -57,7 +69,8 @@ class TestQL(TestCase):
                                    state_t1,
                                    terminatiion,
                                    num_action,
-                                   gamma)
+                                   gamma,
+                                   huber=False)
         # 100 = precision
         self.assertTrue(tf.math.reduce_all(tf.round(100 * qerr) ==
                                            tf.round(100 * gamma**2.)))
@@ -82,6 +95,8 @@ class TestQL(TestCase):
 
 
 if __name__ == "__main__":
+    T = TestHuber()
+    T.test_huber()
     T = TestQL()
     T.setUp()
     T.test_greedy_select()

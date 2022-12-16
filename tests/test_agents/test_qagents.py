@@ -5,7 +5,7 @@ import tensorflow as tf
 from typing import List
 from unittest import TestCase
 from tensorflow.keras.layers import Dense, Layer
-from agents.q_agents import QAgent, RunIface, MemoryBuffer
+from agents.q_agents import QAgent, RunIface
 from arch_layers.simple_networks import DenseNetwork
 
 
@@ -44,9 +44,7 @@ class TestDQN(TestCase):
         eval_model = DenseScalar()
         rng = npr.default_rng(42)
         run_iface = RunIface(eval_model, 2, 0.25, rng)
-        mem_buff = MemoryBuffer(5000, rng)
         self.QA = QAgent(run_iface,
-                         mem_buff,
                          eval_model, DenseScalar(),
                          rng,
                          2, 2,

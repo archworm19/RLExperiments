@@ -158,7 +158,8 @@ class QAgent(Agent):
                                    inputs[0], inputs[1],
                                    [inputs[2]], [inputs[3]],
                                    inputs[4],
-                                   self.num_actions, self.gamma)       
+                                   self.num_actions, self.gamma,
+                                   huber=True)       
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})

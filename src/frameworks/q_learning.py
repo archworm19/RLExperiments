@@ -35,6 +35,23 @@ def calc_q_error(q_t: tf.Tensor, max_q_t1: tf.Tensor,
     return tf.math.pow(Y_t - q_t, 2.), Y_t
 
 
+def calc_q_error_huber(q_t: tf.Tensor, max_q_t1: tf.Tensor,
+                       reward_t1, gamma: float,
+                       huber_delta: float = 1.):
+    # same as above but uses Huber instead of L2
+    Y_t = reward_t1 + gamma * max_q_t1
+    di = Y_t - q_t
+    # Huber
+    abs_di = tf.math.abs(di)
+    # small mag: if |a| <= delta --> 1/2 * a^2
+    small_mag = 0.5 * tf.math.pow(di, 2.)
+    # large mag: if |a| > delta --> delta * (|a| - .5 delta)
+    large_mag = huber_delta * (abs_di - 0.5 * huber_delta)
+    small_mask = tf.cast(abs_di <= huber_delta, small_mag.dtype)
+    err = small_mask * small_mag + (1. - small_mask) * large_mag
+    return err, Y_t
+
+
 # Model-Dependent Q calculation
 
 
@@ -82,7 +99,8 @@ def calc_q_error_sm(q_model: Layer,
                     state_t1: List[tf.Tensor],
                     termination: tf.Tensor,
                     num_action: int,
-                    gamma: float):
+                    gamma: float,
+                    huber: bool = True):
     """Calculate the Q error given 3 scalar models
         Flexibile enough to be used by multiple kinds of Q learning
 
@@ -113,6 +131,7 @@ def calc_q_error_sm(q_model: Layer,
         num_actions (int): number of actions available to agent
             only works for discrete action space
         gamma (float): q learning discount factor
+        huber (bool): whether to use huber loss
 
     Returns:
         tf.Tensor: Q error
@@ -127,4 +146,6 @@ def calc_q_error_sm(q_model: Layer,
     # else --> 0
     max_q_t1 = (1. - termination) * max_q_t1
     q_t = q_model(action_t, state_t)
+    if huber:
+        return calc_q_error_huber(q_t, max_q_t1, reward_t1, gamma)
     return calc_q_error(q_t, max_q_t1, reward_t1, gamma)
