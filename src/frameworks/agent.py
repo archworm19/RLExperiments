@@ -24,6 +24,11 @@ class Agent(ABC):
 
     def init_action(self):
         """Initial action agent should take
+
+        Returns:
+            Union[int, List[float]]:
+                int if discrete action space
+                List[float] if continuous
         """
         pass
 
@@ -36,7 +41,9 @@ class Agent(ABC):
                     ...
 
         Returns:
-            int: index of selected action
+            Union[int, List[float]]:
+                int if discrete action space
+                List[float] if continuous
         """
         pass
 

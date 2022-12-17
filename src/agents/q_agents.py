@@ -8,13 +8,16 @@
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
-from typing import List, Union
+from typing import List, Union, Callable, Tuple
 from tensorflow.keras.layers import Layer
 from frameworks.agent import Agent
-from frameworks.q_learning import calc_q_error_sm
+from frameworks.q_learning import calc_q_error_sm, calc_q_error_cont
 from frameworks.custom_model import CustomModel
 from agents.utils import build_action_probes
 from replay_buffers.replay_buffs import MemoryBuffer
+
+
+# utils
 
 
 def _one_hot(x: np.ndarray, num_action: int):
@@ -22,6 +25,18 @@ def _one_hot(x: np.ndarray, num_action: int):
     x_oh = np.zeros((np.shape(x)[0], num_action))
     x_oh[np.arange(np.shape(x)[0]), x] = 1.
     return x_oh
+
+
+def copy_model(send_model: Layer, rec_model: Layer,
+               tau: float):
+    # copy weights from send_model to rec_model
+    # rec_model <- (1 - tau) * rec_model + tau * send_model
+    send_weights = send_model.get_weights()
+    rec_weights = rec_model.get_weights()
+    new_weights = []
+    for send, rec in zip(send_weights, rec_weights):
+        new_weights.append(tau * send + (1 - tau) * rec)
+    rec_model.set_weights(new_weights)
 
 
 class RunIface:
@@ -71,6 +86,46 @@ class RunIface:
 
         # greedy
         return tf.argmax(scores).numpy()
+
+
+class RunIfaceCont:
+    # continuous-domain run interface
+    # pi_model: pi(a | s)
+    # TODO: action variance vector / matrix?
+
+    def __init__(self,
+                 pi_model: Layer,
+                 bounds: List[Tuple],
+                 action_variance: float,
+                 rng: npr.Generator):
+        # bounds = list of (lower_bound, upper_bound) pairs
+        #       for each action dim
+        self.pi_model = pi_model
+        self.bounds = np.array(bounds)
+        self.action_variance = np.eye(len(self.bounds)) * action_variance
+        self.rng = rng
+
+    def _noisify_and_clip(self, x):
+        x = self.rng.multivariate_normal(x, self.action_variance)
+        return np.clip(x, self.bounds[:, 0], self.bounds[:, 1])
+
+    def init_action(self):
+        # returns: List[float]
+        mid_pt = np.mean(self.bounds, axis=1)
+        return self._noisify_and_clip(mid_pt).tolist()
+
+    def select_action(self, state: List[np.ndarray], debug: bool = False):
+        """
+        Args:
+            state (List[np.ndarray]): set of unbatched input tensors
+                each with shape:
+                    ...
+
+        Returns:
+            List[float]
+        """
+        a = self.pi_model(state)
+        return self._noisify_and_clip(a).tolist()
 
 
 class QAgent(Agent):
@@ -151,7 +206,7 @@ class QAgent(Agent):
                                  name="state_t1", dtype=tf.float32),
                   tf.keras.Input(shape=(),
                                  name="termination", dtype=tf.float32)]
-        # need to duplicate losses and models to be able to switch
+        # loss ~ discrete Q error framework
         Q_err, _ = calc_q_error_sm(self.free_model,
                                    self.free_model,
                                    self.memory_model,
@@ -159,7 +214,7 @@ class QAgent(Agent):
                                    [inputs[2]], [inputs[3]],
                                    inputs[4],
                                    self.num_actions, self.gamma,
-                                   huber=True)       
+                                   huber=False)       
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
@@ -192,17 +247,7 @@ class QAgent(Agent):
         #   approximation of updating the Q table
         # according to: memory <- tau * free + (1 - tau) * memory
         #   NOTE: tau should probably be pretty small
-        free_weights = self.free_model.get_weights()
-        mem_weights = self.memory_model.get_weights()
-        new_weights = []
-        diffs = []
-        for mem, fr in zip(mem_weights, free_weights):
-            new_weights.append(self.tau * fr + (1. - self.tau) * mem)
-            if debug:
-                diffs.append(np.sum((mem - fr)**2.))
-        if debug:
-            print(np.sum(diffs))
-        self.memory_model.set_weights(new_weights)
+        copy_model(self.free_model, self.memory_model, self.tau)
 
     def _draw_sample(self):
         d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
@@ -233,6 +278,143 @@ class QAgent(Agent):
         d = {"state": state[0],
              "state_t1": state_t1[0],
              "action": action,
+             "reward": reward,
+             "termination": termination}
+        self.mem_buffer.append(d)
+
+
+class QAgent_cont(Agent):
+    # basic continuous Q agent
+    #   drpg paper
+
+    def __init__(self,
+                 run_iface: RunIfaceCont,
+                 q_model_builder: Callable,
+                 pi_model_builder: Callable,
+                 rng: npr.Generator,
+                 state_dims: int,
+                 gamma: float = 0.7,
+                 tau: float = 0.01,
+                 batch_size: int = 128,
+                 num_batch_sample: int = 8,
+                 train_epoch: int = 1):
+        """
+        Args:
+            run_iface (RunIfaceCont): interface that implements the
+                run strategy ~ continuous space
+            q_model_builder (Callable): function that builds a keras
+                layer with the following call signature:
+                    call(action: tf.Tensor, state: List[tf.Tensor])
+                expected reward approximator
+            pi_model_builder (Callable): function that builds a keras
+                layer with the following call signature:
+                    call(state: List[tf.Tensor])
+                action generator
+            rng (npr.Generator):
+            state_dims (int): number of dimensions in state
+                assumes state can be easily represented by
+                single tensor
+            gamma (float): discount factor
+            tau (float): update rate (often referred to as alpha in literature)
+                after training eval, eval weights are copied to selection
+                where update follows selection <- tau * eval + (1 - tau) * selection
+            batch_size (int):
+            num_batch_sample (int):
+                number of batches to sample for a given training step
+            train_epoch (int):
+        """
+        super(QAgent, self).__init__()
+        self.run_iface = run_iface
+        self.mem_buffer = MemoryBuffer(["reward",
+                                        "state", "state_t1",
+                                        "termination"], rng,
+                                        500000)
+        self.q_model = q_model_builder()
+        self.qprime_model = q_model_builder()
+        self.pi_model = pi_model_builder()
+        self.piprime_model = pi_model_builder()
+        self.gamma = gamma
+        self.tau = tau
+        self.batch_size = batch_size
+        self.num_batch_sample = num_batch_sample
+        self.train_epoch = train_epoch
+        self.rng = rng
+
+        inputs = [tf.keras.Input(shape=(),
+                                 name="reward", dtype=tf.float32),
+                  tf.keras.Input(shape=(state_dims,),
+                                 name="state", dtype=tf.float32),
+                  tf.keras.Input(shape=(state_dims,),
+                                 name="state_t1", dtype=tf.float32),
+                  tf.keras.Input(shape=(),
+                                 name="termination", dtype=tf.float32)]
+        # loss ~ continuous Q error framework
+        Q_err, _ = calc_q_error_cont(self.q_model,
+                                     self.pi_model,
+                                     self.qprime_model,
+                                     self.piprime_model,
+                                     inputs[0],
+                                     [inputs[1]], [inputs[2]],
+                                     inputs[3],
+                                     self.gamma,
+                                     huber=False)     
+        self.kmodel = CustomModel("loss",
+                                  inputs=inputs,
+                                  outputs={"loss": tf.math.reduce_mean(Q_err)})
+        self.kmodel.compile(tf.keras.optimizers.Adam(.001))
+
+        # align the models
+        tau_hold = self.tau
+        self.tau = 1.
+        self._copy_model()
+        self.tau = tau_hold
+
+    def init_action(self):
+        return self.run_iface.init_action()
+
+    def select_action(self, state: List[np.ndarray], debug: bool = False):
+        """greedy action selection
+
+        Args:
+            state (List[np.ndarray]): set of unbatched input tensors
+                each with shape:
+                    ...
+
+        Returns:
+            int: index of selected action
+        """
+        return self.run_iface.select_action(state, debug=debug)
+
+    def _copy_model(self, debug: bool = False):
+        copy_model(self.q_model, self.qprime_model, self.tau)
+        copy_model(self.pi_model, self.piprime_model, self.tau)
+
+    def _draw_sample(self):
+        d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
+        d = {k: np.array(d[k]) for k in d}
+        return tf.data.Dataset.from_tensor_slices(d)
+
+    def train(self, debug: bool = False):
+        """train agent on run data
+
+        Args:
+            run_data (RunData):
+        """
+        dset = self._draw_sample()
+        history = self.kmodel.fit(dset.batch(self.batch_size),
+                                  epochs=self.train_epoch,
+                                  verbose=0)
+        return history
+
+    def save_data(self,
+                  state: List[List[float]],
+                  state_t1: List[List[float]],
+                  action: Union[int, float, List],
+                  reward: float,
+                  termination: bool):
+        # NOTE: only saves a single step
+        d = {"state": state[0],
+             "state_t1": state_t1[0],
              "reward": reward,
              "termination": termination}
         self.mem_buffer.append(d)

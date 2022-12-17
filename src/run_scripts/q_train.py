@@ -116,10 +116,12 @@ if __name__ == "__main__":
 
     # cartpole
     (env_config, def_params) = Envs.cartpole.value
+    run_length = 1000
     # lunar lander
     # (env_config, def_params) = Envs.lunar.value
-    (env_config, def_params) = Envs.acrobot.value
-    run_length = 500
+    # run_length = 1000
+    # (env_config, def_params) = Envs.acrobot.value
+    # run_length = 500
 
     # run
     agent = build_dense_qagent(num_actions=env_config.num_actions,
