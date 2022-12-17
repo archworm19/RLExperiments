@@ -18,6 +18,8 @@ def runner(env: gym.Env,
     # action_model must keep track of (memory)
     #   1. previous observations, 2. previous actions
     # action model must take in env.step output
+    # NOTE: this function should be agnostic to continuous vs. discrete
+    #   control as long as agent and environment are compatible
     action = agent.init_action()
     cur_state = env.step(init_action)[0]
     save_rewards = []

@@ -79,3 +79,6 @@ class Agent(ABC):
             termination (bool): done?
         """
         pass
+
+    def end_epoch(self):
+        """Signal to agent that epoch is over"""

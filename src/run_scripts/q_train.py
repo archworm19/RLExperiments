@@ -60,14 +60,11 @@ def run_and_train(env_config: EnvConfig,
                   seed_runs: int = 20,
                   step_per_train: int = 1,
                   step_per_copy: int = 1):
+    # NOTE: should work in discrete or continious case
     # run params
-    # decay_rate^num_runs = .01
-    rap_decay_rate = .01 ** (1. / num_runs)
     run_length = run_length
     # number of seeds per 
     num_runs = num_runs
-
-    agent.run_iface.rand_act_prob = 1.
 
     # render modes:
     #   None(default): no render
@@ -104,8 +101,8 @@ def run_and_train(env_config: EnvConfig,
 
         print(rews[-1])
 
-        # decay:
-        agent.run_iface.rand_act_prob *= rap_decay_rate
+        # signal end of epoch
+        agent.end_epoch()
 
     env_run.close()
     env_disp.close()

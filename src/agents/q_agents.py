@@ -142,7 +142,8 @@ class QAgent(Agent):
                  tau: float = 0.01,
                  batch_size: int = 128,
                  num_batch_sample: int = 8,
-                 train_epoch: int = 1):
+                 train_epoch: int = 1,
+                 rand_act_decay: float = 0.95):
         # TODO: eval_model and selection_model must be the same
         # underlying model (with different weights)
         # TODO/FIX: take in builder instead
@@ -179,6 +180,8 @@ class QAgent(Agent):
             num_batch_sample (int):
                 number of batches to sample for a given training step
             train_epoch (int):
+            rand_act_decay (float): how much the probability of a random
+                action decays at end of each epoch
         """
         super(QAgent, self).__init__()
         self.run_iface = run_iface
@@ -195,6 +198,7 @@ class QAgent(Agent):
         self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
+        self.rand_act_decay = rand_act_decay
 
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
@@ -219,6 +223,8 @@ class QAgent(Agent):
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
+
+        self.run_iface.rand_act_prob = 1.
 
         # align the models
         tau_hold = self.tau
@@ -282,6 +288,9 @@ class QAgent(Agent):
              "termination": termination}
         self.mem_buffer.append(d)
 
+    def end_epoch(self):
+        self.run_iface.rand_act_prob *= self.rand_act_decay
+
 
 class QAgent_cont(Agent):
     # basic continuous Q agent
@@ -297,7 +306,8 @@ class QAgent_cont(Agent):
                  tau: float = 0.01,
                  batch_size: int = 128,
                  num_batch_sample: int = 8,
-                 train_epoch: int = 1):
+                 train_epoch: int = 1,
+                 var_decay: float = 0.95):
         """
         Args:
             run_iface (RunIfaceCont): interface that implements the
@@ -322,6 +332,8 @@ class QAgent_cont(Agent):
             num_batch_sample (int):
                 number of batches to sample for a given training step
             train_epoch (int):
+            var_decay (float): how much variance of action selection decays
+                with each epoch
         """
         super(QAgent, self).__init__()
         self.run_iface = run_iface
@@ -339,6 +351,7 @@ class QAgent_cont(Agent):
         self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
+        self.var_decay = var_decay
 
         inputs = [tf.keras.Input(shape=(),
                                  name="reward", dtype=tf.float32),
@@ -418,3 +431,6 @@ class QAgent_cont(Agent):
              "reward": reward,
              "termination": termination}
         self.mem_buffer.append(d)
+
+    def end_epoch(self):
+        self.run_iface.action_variance = self.run_iface.action_variance * self.var_decay
