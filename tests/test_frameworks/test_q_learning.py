@@ -3,7 +3,8 @@ import tensorflow as tf
 from typing import List
 from unittest import TestCase
 from tensorflow.keras.layers import Layer
-from frameworks.q_learning import calc_q_error_sm, _greedy_select, calc_q_error_huber
+from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error_huber,
+                                   calc_q_error_cont)
 
 
 class AModel(Layer):
@@ -94,6 +95,70 @@ class TestQL(TestCase):
                                            tf.round(100 * 0.)))
 
 
+class QModel(Layer):
+
+    def __init__(self):
+        super(QModel, self).__init__()
+
+    def call(self, action: tf.Tensor, state: List[tf.Tensor]):
+        # assumes: state and action space have same dimensionality
+        # both are batch_size x ...
+        return action + state[0]
+
+
+class PiModel(Layer):
+    # returns action_t[:, target_idx]
+
+    def __init__(self):
+        super(PiModel, self).__init__()
+
+    def call(self, state_t: List[tf.Tensor]):
+        return state_t[0]
+
+
+class TestQLcont(TestCase):
+
+    # TODO: test design
+    # > positive control: use same Q, pi but add reward/gamma offset to prime versions
+    # > error minimization: ???
+
+    def setUp(self) -> None:
+        self.Q = QModel()
+        self.pi = PiModel()
+
+    def test_positive_control(self):
+        # def: Q(pi, s) = r + gamma * Q(pi, s)
+        # --> error = d(Q - [r + gamma * Q])
+        #           = d(Q * (1 - gamma) - r)
+        batch_size = 8
+        s = tf.random.uniform([batch_size])
+        r = tf.random.uniform([batch_size])
+        term = tf.zeros([batch_size])
+        gamma = 0.85
+        Qval = self.Q(self.pi([s]), [s])
+        err, Y_t = calc_q_error_cont(self.Q, self.pi, self.Q, self.pi,
+                                     r, [s], [s], term, gamma, huber=False)
+        target = tf.pow(Qval * (1. - gamma) - r, 2.)
+        self.assertTrue(tf.math.reduce_all(tf.round(err * 100) ==
+                                           tf.round(target * 100)))
+
+    def test_negative_control(self):
+        # positive control condition fails when state t1 is changed
+        #   <-- models is operating in a different state
+        batch_size = 8
+        s = tf.random.uniform([batch_size])
+        s_t1 = s + 1.
+        r = tf.random.uniform([batch_size])
+        term = tf.zeros([batch_size])
+        gamma = 0.85
+        Qval = self.Q(self.pi([s]), [s])
+        err, Y_t = calc_q_error_cont(self.Q, self.pi, self.Q, self.pi,
+                                     r, [s], [s_t1], term, gamma, huber=False)
+        target = tf.pow(Qval * (1. - gamma) - r, 2.)
+        self.assertFalse(tf.math.reduce_all(tf.round(err * 100) ==
+                                            tf.round(target * 100)))
+
+
 if __name__ == "__main__":
     T = TestHuber()
     T.test_huber()
@@ -101,3 +166,7 @@ if __name__ == "__main__":
     T.setUp()
     T.test_greedy_select()
     T.test_double_q()
+    T = TestQLcont()
+    T.setUp()
+    T.test_positive_control()
+    T.test_negative_control()
