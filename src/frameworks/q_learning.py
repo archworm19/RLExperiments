@@ -107,8 +107,6 @@ def calc_q_error_sm(q_model: Layer,
     """Calculate the Q error given 3 scalar models
         Flexibile enough to be used by multiple kinds of Q learning
 
-        TODO: expand this explanation
-
         Q = q_model
         Q_s = selection model
         Q_e = evaluation model
@@ -156,10 +154,10 @@ def calc_q_error_sm(q_model: Layer,
     return calc_q_error(q_t, max_q_t1, reward_t1, gamma)
 
 
-def calc_q_error_cont(q_model: Layer,
-                      pi_model: Layer,
+def calc_q_error_critic(q_model: Layer,
                       qprime_model: Layer,
                       piprime_model: Layer,
+                      action_t: tf.Tensor,
                       reward_t1: tf.Tensor,
                       state_t: List[tf.Tensor],
                       state_t1: List[tf.Tensor],
@@ -167,29 +165,20 @@ def calc_q_error_cont(q_model: Layer,
                       gamma: float,
                       huber: bool = True):
     """continuous-space Q error (DDPG)
-        goal: find Q*, pi* such that Q*(s_t, pi*(s_t)) = r_t1 + gamma * Q*(s_t1, pi*(s_t1))
-            if you've found such models for all of state space -->
-            if can be shown that they accurately estimate expected reward over horizon
-        Q learning approach:
-            > for subset of state space and Q^i, pi^i --> find Q^{i+1}, pi^{i+1} that makes
-                the above eqn hold: Q^{i+1}(pi^{i+1}) = r + gamma * Q^i(pi^i)
-            > (not performed here): do this procedure iteratively, update Q and pi
-            > to find Q^{i+1}: minimize Q_error (calculated here)
-                Q_error = d(Q(s_t, pi(s_t)), r_t1 + gamma * Q'(s_t1, pi'(s_t1))
-                    where d is some distance function (commonly L2)
-        How is this different from discrete?
-            have an actor model pi(a | s). In discrete case, only 1 model is needed
-            and actions are chosen greedily by what action maximizes Q
+
+    Q = q_model
+    pi = pi_model
+
+    Q_err = f(Q(a_t, s_t) - Y_t)
+        where Y_t = r_t1 + gamma * Q'(pi'(s_t1), s_t1)
+    difference from continuous space?
+        > no greedy ~ selects actions based on action model pi
+    KEY: prime models are frozen here ~ just optimizing Q
 
     Args:
         q_model (Layer):
-        pi_model (Layer):
-            Q = Q_model(state_t, pi_model(state_t))
         qprime_model (Layer):
         piprime_model (Layer):
-            Y_t = Qprime_model(state_t1, piprime_model(state_t1))
-            these models are treated as fixed
-
             q model call signature:
                 call(action: tf.Tensor, state: List[tf.Tensor]) -->
                     tf.Tensor with shape = batch_size
@@ -197,6 +186,7 @@ def calc_q_error_cont(q_model: Layer,
                 call(state: List[tf.Tensor]) -->
                     tf.Tensor with shape = batch_size
 
+        action_t (tf.Tensor): action at time t
         reward_t1 (tf.Tensor): reward at time t+1 (follows from action_t)
         state_t (List[tf.Tensor]): state at time t
         state_t1 (List[tf.Tensor]): state at time t+1
@@ -212,8 +202,8 @@ def calc_q_error_cont(q_model: Layer,
         tf.Tensor: Y_t = target
             both have shape = batch_size
     """
-    # Q(state_t, pi(state_t))
-    Qval = q_model(pi_model(state_t), state_t)
+    # Q
+    Qval = q_model(action_t, state_t)
     # Q'(state_t1, pi(state_t1))
     Q_prime = tf.stop_gradient(qprime_model(piprime_model(state_t1),
                                             state_t1))
@@ -224,3 +214,31 @@ def calc_q_error_cont(q_model: Layer,
     if huber:
         return calc_q_error_huber(Qval, Q_prime, reward_t1, gamma)
     return calc_q_error(Qval, Q_prime, reward_t1, gamma)
+
+
+def calc_grad_actor(q_model: Layer,
+                    pi_model: Layer,
+                    state_t: List[tf.Tensor]):
+    """deterministic policy gradient for action model pi
+    return the gradient wrt parameters of model pi
+    can use this gradient to perform gradient ascent
+
+    KEY: requires that weights for q and pi are already built
+
+    Args:
+        q_model (Layer):
+        pi_model (Layer):
+        state_t (List[tf.Tensor]): start at time t
+            where each 
+
+    Returns:
+        zip object: iterating thru this zip object -->
+            (NEGATIVE batch mean of gradient evaluation, trainable weight) pairs
+            can be easily use with a keras optimizer
+    """
+    with tf.GradientTape(watch_accessed_variables=False) as g:
+        g.watch(pi_model.trainable_weights)
+        Qval = -1. * tf.math.reduce_mean(q_model(pi_model(state_t), state_t),
+                                         axis=0)
+    return zip(g.gradient(Qval, pi_model.trainable_weights),
+               pi_model.trainable_weights)

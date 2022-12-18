@@ -2,9 +2,9 @@
 import tensorflow as tf
 from typing import List
 from unittest import TestCase
-from tensorflow.keras.layers import Layer
+from tensorflow.keras.layers import Layer, Dense
 from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error_huber,
-                                   calc_q_error_cont)
+                                   calc_q_error_critic, calc_grad_actor)
 
 
 class AModel(Layer):
@@ -111,9 +111,10 @@ class PiModel(Layer):
 
     def __init__(self):
         super(PiModel, self).__init__()
+        self.d = Dense(1)
 
     def call(self, state_t: List[tf.Tensor]):
-        return state_t[0]
+        return self.d(tf.expand_dims(state_t[0], 0))[:,0]
 
 
 class TestQLcont(TestCase):
@@ -135,8 +136,9 @@ class TestQLcont(TestCase):
         r = tf.random.uniform([batch_size])
         term = tf.zeros([batch_size])
         gamma = 0.85
+        a = self.pi([s])
         Qval = self.Q(self.pi([s]), [s])
-        err, Y_t = calc_q_error_cont(self.Q, self.pi, self.Q, self.pi,
+        err, Y_t = calc_q_error_critic(self.Q, self.Q, self.pi, a,
                                      r, [s], [s], term, gamma, huber=False)
         target = tf.pow(Qval * (1. - gamma) - r, 2.)
         self.assertTrue(tf.math.reduce_all(tf.round(err * 100) ==
@@ -151,12 +153,29 @@ class TestQLcont(TestCase):
         r = tf.random.uniform([batch_size])
         term = tf.zeros([batch_size])
         gamma = 0.85
+        a = self.pi([s])
         Qval = self.Q(self.pi([s]), [s])
-        err, Y_t = calc_q_error_cont(self.Q, self.pi, self.Q, self.pi,
+        err, Y_t = calc_q_error_critic(self.Q, self.Q, self.pi, a,
                                      r, [s], [s_t1], term, gamma, huber=False)
         target = tf.pow(Qval * (1. - gamma) - r, 2.)
         self.assertFalse(tf.math.reduce_all(tf.round(err * 100) ==
                                             tf.round(target * 100)))
+
+    def test_actor_grad(self):
+        # TODO: first: let's see if anything happens
+        batch_size = 8
+        s = tf.random.uniform([batch_size])
+        # build weights:
+        Qval = self.Q(self.pi([s]), [s])
+        g = calc_grad_actor(self.Q, self.pi, [s])
+        # gradient ascent for a few steps:
+        Q0 = tf.math.reduce_mean(Qval)
+        opt = tf.keras.optimizers.SGD()
+        for _ in range(10):
+            g = calc_grad_actor(self.Q, self.pi, [s])
+            opt.apply_gradients(g)
+        Qfin = tf.math.reduce_mean(self.Q(self.pi([s]), [s]))
+        self.assertTrue(Qfin > Q0)
 
 
 if __name__ == "__main__":
@@ -170,3 +189,4 @@ if __name__ == "__main__":
     T.setUp()
     T.test_positive_control()
     T.test_negative_control()
+    T.test_actor_grad()
