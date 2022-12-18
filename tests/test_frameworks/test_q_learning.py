@@ -4,7 +4,7 @@ from typing import List
 from unittest import TestCase
 from tensorflow.keras.layers import Layer, Dense
 from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error_huber,
-                                   calc_q_error_critic, calc_grad_actor)
+                                   calc_q_error_critic, calc_q_error_actor)
 
 
 class AModel(Layer):
@@ -167,14 +167,15 @@ class TestQLcont(TestCase):
         s = tf.random.uniform([batch_size])
         # build weights:
         Qval = self.Q(self.pi([s]), [s])
-        g = calc_grad_actor(self.Q, self.pi, [s])
+        Q0 = -1 * calc_q_error_actor(self.Q, self.pi, [s])
         # gradient ascent for a few steps:
-        Q0 = tf.math.reduce_mean(Qval)
-        opt = tf.keras.optimizers.SGD()
+        opt = tf.keras.optimizers.SGD(0.1)
         for _ in range(10):
-            g = calc_grad_actor(self.Q, self.pi, [s])
-            opt.apply_gradients(g)
-        Qfin = tf.math.reduce_mean(self.Q(self.pi([s]), [s]))
+            with tf.GradientTape() as tape:
+                loss = calc_q_error_actor(self.Q, self.pi, [s])
+            g = tape.gradient(loss, self.pi.trainable_weights)
+            opt.apply_gradients(zip(g, self.pi.trainable_weights))
+        Qfin = -1 * calc_q_error_actor(self.Q, self.pi, [s])
         self.assertTrue(Qfin > Q0)
 
 

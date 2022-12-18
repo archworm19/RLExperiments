@@ -216,29 +216,26 @@ def calc_q_error_critic(q_model: Layer,
     return calc_q_error(Qval, Q_prime, reward_t1, gamma)
 
 
-def calc_grad_actor(q_model: Layer,
+def calc_q_error_actor(q_model: Layer,
                     pi_model: Layer,
                     state_t: List[tf.Tensor]):
     """deterministic policy gradient for action model pi
     return the gradient wrt parameters of model pi
     can use this gradient to perform gradient ascent
 
-    KEY: requires that weights for q and pi are already built
+    grad J approx= (1/N) sum_i [grad_{a} Q grad_{theta} mu(s)]
+        = grad_{theta} mean(Q)
+    error = negative of mean(Q)
+    NOTE: no stop gradient is applied
+        --> will have to restrict trainable variables downstream
 
     Args:
-        q_model (Layer):
+        q_model (Layer): no gradient thru critic
         pi_model (Layer):
         state_t (List[tf.Tensor]): start at time t
             where each 
 
     Returns:
-        zip object: iterating thru this zip object -->
-            (NEGATIVE batch mean of gradient evaluation, trainable weight) pairs
-            can be easily use with a keras optimizer
+        tf.Tensor: -1 * Q() ~ scalar
     """
-    with tf.GradientTape(watch_accessed_variables=False) as g:
-        g.watch(pi_model.trainable_weights)
-        Qval = -1. * tf.math.reduce_mean(q_model(pi_model(state_t), state_t),
-                                         axis=0)
-    return zip(g.gradient(Qval, pi_model.trainable_weights),
-               pi_model.trainable_weights)
+    return -1. * tf.math.reduce_mean(q_model(pi_model(state_t), state_t))
