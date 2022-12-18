@@ -11,7 +11,7 @@ import tensorflow as tf
 from typing import List, Union, Callable, Tuple
 from tensorflow.keras.layers import Layer
 from frameworks.agent import Agent
-from frameworks.q_learning import calc_q_error_sm, calc_q_error_cont
+from frameworks.q_learning import calc_q_error_sm, calc_q_error_critic, calc_q_error_actor
 from frameworks.custom_model import CustomModel
 from agents.utils import build_action_probes
 from replay_buffers.replay_buffs import MemoryBuffer
@@ -124,7 +124,10 @@ class RunIfaceCont:
         Returns:
             List[float]
         """
-        a = self.pi_model(state)
+        # NOTE: need to expand dims cuz unbatched
+        state = [tf.expand_dims(state[0], 0)]
+        # returns batch_size (1 here) x action_dims
+        a = self.pi_model(state)[0].numpy()
         return self._noisify_and_clip(a).tolist()
 
 
@@ -301,6 +304,7 @@ class QAgent_cont(Agent):
                  q_model_builder: Callable,
                  pi_model_builder: Callable,
                  rng: npr.Generator,
+                 action_dims: int,
                  state_dims: int,
                  gamma: float = 0.7,
                  tau: float = 0.01,
@@ -321,6 +325,7 @@ class QAgent_cont(Agent):
                     call(state: List[tf.Tensor])
                 action generator
             rng (npr.Generator):
+            action_dims (int): number of action dimensions
             state_dims (int): number of dimensions in state
                 assumes state can be easily represented by
                 single tensor
@@ -335,7 +340,7 @@ class QAgent_cont(Agent):
             var_decay (float): how much variance of action selection decays
                 with each epoch
         """
-        super(QAgent, self).__init__()
+        super(QAgent_cont, self).__init__()
         self.run_iface = run_iface
         self.mem_buffer = MemoryBuffer(["reward",
                                         "state", "state_t1",
@@ -353,7 +358,9 @@ class QAgent_cont(Agent):
         self.rng = rng
         self.var_decay = var_decay
 
-        inputs = [tf.keras.Input(shape=(),
+        inputs = [tf.keras.Input(shape=(action_dims,),
+                                 name="action", dtype=tf.float32),
+                  tf.keras.Input(shape=(),
                                  name="reward", dtype=tf.float32),
                   tf.keras.Input(shape=(state_dims,),
                                  name="state", dtype=tf.float32),
@@ -362,19 +369,21 @@ class QAgent_cont(Agent):
                   tf.keras.Input(shape=(),
                                  name="termination", dtype=tf.float32)]
         # loss ~ continuous Q error framework
-        Q_err, _ = calc_q_error_cont(self.q_model,
-                                     self.pi_model,
+        Q_err, _ = calc_q_error_critic(self.q_model,
                                      self.qprime_model,
                                      self.piprime_model,
-                                     inputs[0],
-                                     [inputs[1]], [inputs[2]],
-                                     inputs[3],
+                                     inputs[0], inputs[1],
+                                     [inputs[2]], [inputs[3]],
+                                     inputs[4],
                                      self.gamma,
                                      huber=False)     
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
+
+        # TODO: should actor learning rate be hyperparam?
+        self.actor_opt = tf.keras.optimizers.SGD(0.1)
 
         # align the models
         tau_hold = self.tau
@@ -407,6 +416,14 @@ class QAgent_cont(Agent):
         d = {k: np.array(d[k]) for k in d}
         return tf.data.Dataset.from_tensor_slices(d)
 
+    @tf.function
+    def _update_actor_step(self, state_t: List[tf.Tensor]):
+        with tf.GradientTape() as tape:
+            loss = calc_q_error_actor(self.q_model, self.pi_model, state_t)
+            # KEY: only differentiate wrt pi model's weights
+            g = tape.gradient(loss, self.pi_model.trainable_weights)
+        self.actor_opt.apply_gradients(zip(g, self.pi_model.trainable_weights))
+
     def train(self, debug: bool = False):
         """train agent on run data
 
@@ -414,9 +431,17 @@ class QAgent_cont(Agent):
             run_data (RunData):
         """
         dset = self._draw_sample()
+        # train critic
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=0)
+                                  verbose=1)
+        # update actor
+        # TODO: just updating according to batch 0 for now
+        #   would probably be more correct to concatenate first
+        for v in dset:
+            self._update_actor_step(v["state"])
+            break
+
         return history
 
     def save_data(self,
