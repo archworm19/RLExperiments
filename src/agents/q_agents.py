@@ -94,13 +94,11 @@ class RunIfaceCont:
     # TODO: action variance vector / matrix?
 
     def __init__(self,
-                 pi_model: Layer,
                  bounds: List[Tuple],
                  action_variance: float,
                  rng: npr.Generator):
         # bounds = list of (lower_bound, upper_bound) pairs
         #       for each action dim
-        self.pi_model = pi_model
         self.bounds = np.array(bounds)
         self.action_variance = np.eye(len(self.bounds)) * action_variance
         self.rng = rng
@@ -114,9 +112,10 @@ class RunIfaceCont:
         mid_pt = np.mean(self.bounds, axis=1)
         return self._noisify_and_clip(mid_pt).tolist()
 
-    def select_action(self, state: List[np.ndarray], debug: bool = False):
+    def select_action(self, model: Layer, state: List[np.ndarray], debug: bool = False):
         """
         Args:
+            model (Layer): action selection model
             state (List[np.ndarray]): set of unbatched input tensors
                 each with shape:
                     ...
@@ -127,7 +126,7 @@ class RunIfaceCont:
         # NOTE: need to expand dims cuz unbatched
         state = [tf.expand_dims(state[0], 0)]
         # returns batch_size (1 here) x action_dims
-        a = self.pi_model(state)[0].numpy()
+        a = model(state)[0].numpy()
         return self._noisify_and_clip(a).tolist()
 
 
@@ -342,7 +341,8 @@ class QAgent_cont(Agent):
         """
         super(QAgent_cont, self).__init__()
         self.run_iface = run_iface
-        self.mem_buffer = MemoryBuffer(["reward",
+        self.mem_buffer = MemoryBuffer(["action",
+                                        "reward",
                                         "state", "state_t1",
                                         "termination"], rng,
                                         500000)
@@ -376,15 +376,17 @@ class QAgent_cont(Agent):
                                      [inputs[2]], [inputs[3]],
                                      inputs[4],
                                      self.gamma,
-                                     huber=False)     
+                                     huber=False)
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
 
         # TODO: should actor learning rate be hyperparam?
-        self.actor_opt = tf.keras.optimizers.SGD(0.1)
+        self.actor_opt = tf.keras.optimizers.SGD(1.)
 
+        # init weights for pi model:
+        _ = self.pi_model([inputs[2]])
         # align the models
         tau_hold = self.tau
         self.tau = 1.
@@ -405,7 +407,7 @@ class QAgent_cont(Agent):
         Returns:
             int: index of selected action
         """
-        return self.run_iface.select_action(state, debug=debug)
+        return self.run_iface.select_action(self.piprime_model, state, debug=debug)
 
     def _copy_model(self, debug: bool = False):
         copy_model(self.q_model, self.qprime_model, self.tau)
@@ -435,12 +437,12 @@ class QAgent_cont(Agent):
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
                                   verbose=1)
+
         # update actor
-        # TODO: just updating according to batch 0 for now
-        #   would probably be more correct to concatenate first
-        for v in dset:
-            self._update_actor_step(v["state"])
-            break
+        # TODO: this is a little diff cuz paper constructin
+        # is not minibatched
+        for v in dset.batch(self.batch_size):
+            self._update_actor_step([v["state"]])
 
         return history
 
@@ -451,7 +453,8 @@ class QAgent_cont(Agent):
                   reward: float,
                   termination: bool):
         # NOTE: only saves a single step
-        d = {"state": state[0],
+        d = {"action": action,
+             "state": state[0],
              "state_t1": state_t1[0],
              "reward": reward,
              "termination": termination}
