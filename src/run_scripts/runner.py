@@ -7,7 +7,6 @@ from frameworks.agent import Agent
 def runner(env: gym.Env,
            agent: Agent,
            max_step: int = 200,
-           init_action: int = 0,
            step_per_train: int = 1,
            step_per_copy: int = 1,
            train_mode: bool = True,
@@ -21,7 +20,7 @@ def runner(env: gym.Env,
     # NOTE: this function should be agnostic to continuous vs. discrete
     #   control as long as agent and environment are compatible
     action = agent.init_action()
-    cur_state = env.step(init_action)[0]
+    cur_state = env.step(action)[0]
     save_rewards = []
     for i in range(max_step):
         action = agent.select_action([cur_state], debug=debug)
@@ -45,6 +44,9 @@ def runner(env: gym.Env,
 
         save_rewards.append(reward)
         cur_state = new_state
+
+        if debug:
+            input("cont?")
 
         # check for termination
         if step_output[2]:

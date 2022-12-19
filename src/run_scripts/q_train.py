@@ -10,7 +10,7 @@ from enum import Enum
 from frameworks.agent import Agent
 
 from run_scripts.runner import runner
-from run_scripts.utils import build_dense_qagent
+from run_scripts.utils import build_dense_qagent, build_dense_qagent_cont
 
 
 @dataclass
@@ -59,7 +59,9 @@ def run_and_train(env_config: EnvConfig,
                   show_progress: bool = True,
                   seed_runs: int = 20,
                   step_per_train: int = 1,
-                  step_per_copy: int = 1):
+                  step_per_copy: int = 1,
+                  runs_per_display: int = 5,
+                  debug_viz: bool = False):
     # NOTE: should work in discrete or continious case
     # run params
     run_length = run_length
@@ -70,6 +72,7 @@ def run_and_train(env_config: EnvConfig,
     #   None(default): no render
     #   "human": continuously render in current display
     #   "rgb_array", "ansi", and a few others
+    # TODO: need better design for specifying continuous
     env_run = gym.make(env_config.env_name)
     if show_progress:
         env_disp = gym.make(env_config.env_name, render_mode="human")
@@ -79,10 +82,10 @@ def run_and_train(env_config: EnvConfig,
     rews = []
     # different seed for each run:
     for i in range(num_runs):
-        if i % 20 == 0:  # use display
+        if i % runs_per_display == 0:  # use display
             active_env = env_disp
+            debug_set = debug_viz
             train_mode = False
-            debug_set = False
         else:
             active_env = env_run
             debug_set = False
@@ -111,6 +114,7 @@ def run_and_train(env_config: EnvConfig,
 
 if __name__ == "__main__":
 
+    """
     # cartpole
     (env_config, def_params) = Envs.cartpole.value
     run_length = 1000
@@ -136,3 +140,45 @@ if __name__ == "__main__":
                                step_per_train=def_params.step_per_train,
                                step_per_copy=def_params.step_per_copy)
     print(reward_seq)
+    """
+
+    # continuous testing (with pendulum)
+    # pendulum works pretty well tho there's still some instability
+    env_config = EnvConfig('Pendulum-v1', 1, 3)
+    action_bounds = [(-2., 2.)]
+    num_observations=3
+    run_length = 500
+    agent = build_dense_qagent_cont(action_bounds=action_bounds,
+                                    num_observations=num_observations,
+                                    tau=0.1, num_batch_sample=1,
+                                    train_epoch=1,
+                                    gamma=0.99,
+                                    batch_size=64,
+                                    drop_rate=.05)
+    reward_seq = run_and_train(env_config, agent,
+                               run_length=run_length, num_runs=200,
+                               seed_runs=5,
+                               step_per_train=1,
+                               step_per_copy=1,
+                               debug_viz=False)
+    print(reward_seq)
+
+    """
+    # continuous testing
+    # TODO: yet another design problem
+    env_config = EnvConfig("LunarLander-v2", 2, 8)
+    run_length=1000
+    # from paper: tau = .001 (I believe)
+    agent = build_dense_qagent_cont(tau=0.1, num_batch_sample=1,
+                                    train_epoch=1,
+                                    gamma=0.99,
+                                    batch_size=64,
+                                    drop_rate=.05)
+    reward_seq = run_and_train(env_config, agent,
+                               run_length=run_length, num_runs=200,
+                               seed_runs=5,
+                               step_per_train=1,
+                               step_per_copy=1,
+                               debug_viz=False)
+    print(reward_seq)
+    """

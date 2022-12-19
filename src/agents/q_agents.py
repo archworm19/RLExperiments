@@ -124,10 +124,14 @@ class RunIfaceCont:
             List[float]
         """
         # NOTE: need to expand dims cuz unbatched
-        state = [tf.expand_dims(state[0], 0)]
+        state = [tf.expand_dims(si, 0) for si in state]
         # returns batch_size (1 here) x action_dims
         a = model(state)[0].numpy()
-        return self._noisify_and_clip(a).tolist()
+        a_noise = self._noisify_and_clip(a).tolist()
+        if debug:
+            print(a)
+            print(a_noise)
+        return a_noise
 
 
 class QAgent(Agent):
@@ -310,7 +314,7 @@ class QAgent_cont(Agent):
                  batch_size: int = 128,
                  num_batch_sample: int = 8,
                  train_epoch: int = 1,
-                 var_decay: float = 0.95):
+                 var_decay: float = 1.):
         """
         Args:
             run_iface (RunIfaceCont): interface that implements the
@@ -345,7 +349,7 @@ class QAgent_cont(Agent):
                                         "reward",
                                         "state", "state_t1",
                                         "termination"], rng,
-                                        500000)
+                                        1000000)
         self.q_model = q_model_builder()
         self.qprime_model = q_model_builder()
         self.pi_model = pi_model_builder()
@@ -381,9 +385,7 @@ class QAgent_cont(Agent):
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
-
-        # TODO: should actor learning rate be hyperparam?
-        self.actor_opt = tf.keras.optimizers.SGD(1.)
+        self.actor_opt = tf.keras.optimizers.Adam(.0001)
 
         # init weights for pi model:
         _ = self.pi_model([inputs[2]])
@@ -407,6 +409,10 @@ class QAgent_cont(Agent):
         Returns:
             int: index of selected action
         """
+        act = self.run_iface.select_action(self.piprime_model, state, debug=debug)
+        if debug:
+            print(self.qprime_model(tf.expand_dims(tf.constant(act), 0),
+                                    [tf.expand_dims(si, 0) for si in state]))
         return self.run_iface.select_action(self.piprime_model, state, debug=debug)
 
     def _copy_model(self, debug: bool = False):
@@ -436,7 +442,7 @@ class QAgent_cont(Agent):
         # train critic
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=1)
+                                  verbose=0)
 
         # update actor
         # TODO: this is a little diff cuz paper constructin
