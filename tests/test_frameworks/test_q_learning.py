@@ -119,10 +119,6 @@ class PiModel(Layer):
 
 class TestQLcont(TestCase):
 
-    # TODO: test design
-    # > positive control: use same Q, pi but add reward/gamma offset to prime versions
-    # > error minimization: ???
-
     def setUp(self) -> None:
         self.Q = QModel()
         self.pi = PiModel()
@@ -156,17 +152,17 @@ class TestQLcont(TestCase):
         a = self.pi([s])
         Qval = self.Q(self.pi([s]), [s])
         err, Y_t = calc_q_error_critic(self.Q, self.Q, self.pi, a,
-                                     r, [s], [s_t1], term, gamma, huber=False)
+                                       r, [s], [s_t1], term, gamma, huber=False)
         target = tf.pow(Qval * (1. - gamma) - r, 2.)
         self.assertFalse(tf.math.reduce_all(tf.round(err * 100) ==
                                             tf.round(target * 100)))
 
     def test_actor_grad(self):
-        # TODO: first: let's see if anything happens
+        # first: let's see if anything happens
         batch_size = 8
         s = tf.random.uniform([batch_size])
         # build weights:
-        Qval = self.Q(self.pi([s]), [s])
+        _ = self.Q(self.pi([s]), [s])
         Q0 = -1 * calc_q_error_actor(self.Q, self.pi, [s])
         # gradient ascent for a few steps:
         opt = tf.keras.optimizers.SGD(0.1)

@@ -155,15 +155,15 @@ def calc_q_error_sm(q_model: Layer,
 
 
 def calc_q_error_critic(q_model: Layer,
-                      qprime_model: Layer,
-                      piprime_model: Layer,
-                      action_t: tf.Tensor,
-                      reward_t1: tf.Tensor,
-                      state_t: List[tf.Tensor],
-                      state_t1: List[tf.Tensor],
-                      termination: tf.Tensor,
-                      gamma: float,
-                      huber: bool = True):
+                        qprime_model: Layer,
+                        piprime_model: Layer,
+                        action_t: tf.Tensor,
+                        reward_t1: tf.Tensor,
+                        state_t: List[tf.Tensor],
+                        state_t1: List[tf.Tensor],
+                        termination: tf.Tensor,
+                        gamma: float,
+                        huber: bool = True):
     """continuous-space Q error (DDPG)
 
     Q = q_model
@@ -217,8 +217,8 @@ def calc_q_error_critic(q_model: Layer,
 
 
 def calc_q_error_actor(q_model: Layer,
-                    pi_model: Layer,
-                    state_t: List[tf.Tensor]):
+                       pi_model: Layer,
+                       state_t: List[tf.Tensor]):
     """deterministic policy gradient for action model pi
     return the gradient wrt parameters of model pi
     can use this gradient to perform gradient ascent
@@ -226,7 +226,7 @@ def calc_q_error_actor(q_model: Layer,
     grad J approx= (1/N) sum_i [grad_{a} Q grad_{theta} mu(s)]
         = grad_{theta} mean(Q)
     error = negative of mean(Q)
-    NOTE: no stop gradient is applied
+    NOTE: no gradient blocking is applied
         --> will have to restrict trainable variables downstream
 
     Args:
