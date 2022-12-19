@@ -1,4 +1,5 @@
 """Testing qagents on fake tasks"""
+from re import S
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
@@ -65,13 +66,26 @@ def _fake_data_reward_button(num_samples: int = 5000,
 def _fake_data_reward_button_cont(num_samples: int = 5000,
                                   action_dims: int = 2,
                                   state_dims: int = 3):
-    # discrete case
-    # "reward button":
+    # continuous case "reward button":
     # reward = sum(action dims)
     rng = npr.default_rng(42)
     states = rng.random((num_samples, state_dims)) - 0.5
     actions = rng.random((num_samples, action_dims)) - 0.5
     rewards = np.sum(actions, axis=1)
+    terms = np.zeros((num_samples,))
+    return (states[:-1], states[1:], actions[:-1],
+                  rewards[:-1], terms[:-1])
+
+
+def _fake_data_positive_response_cont(num_samples: int = 5000,
+                                      action_dims: int = 2,
+                                      state_dims: int = 3):
+    # positive response == response should be correlated with sum(state)
+    # reward = sum(actions) * sum(state)
+    rng = npr.default_rng(42)
+    states = rng.random((num_samples, state_dims)) - 0.5
+    actions = rng.random((num_samples, action_dims)) - 0.5
+    rewards = np.sum(actions, axis=1) * np.sum(states, axis=1)
     terms = np.zeros((num_samples,))
     return (states[:-1], states[1:], actions[:-1],
                   rewards[:-1], terms[:-1])
@@ -153,15 +167,22 @@ class TestDQNcont(TestCase):
         self.state_dims = 3
         self.QA = QAgent_cont(run_iface, q_builder, pi_builder,
                               rng, len(bounds), self.state_dims,
-                              tau=1.)
+                              tau=0.1,
+                              critic_lr=.01, actor_lr=.005)
+        self.buffer_size = 5000
+        self.QA.mem_buffer.buffer_size = self.buffer_size
 
-        # load in data:
-        dat = _fake_data_reward_button_cont(action_dims=2, state_dims=self.state_dims)
+    def _load_data(self, dat):
         for i in range(len(dat[0])):
             self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
-                              dat[3][i], dat[4][i])
+                                dat[3][i], dat[4][i])
 
     def test_dset_build(self):
+        # load in data:
+        self._load_data(_fake_data_reward_button_cont(num_samples=self.buffer_size,
+                                                      action_dims=2,
+                                                      state_dims=self.state_dims))
+
         dset = self.QA._draw_sample().batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
@@ -172,8 +193,13 @@ class TestDQNcont(TestCase):
             break
 
     def test_reward_button(self):
+        # load in data:
+        self._load_data(_fake_data_reward_button_cont(num_samples=self.buffer_size,
+                                                      action_dims=2,
+                                                      state_dims=self.state_dims))
+
         # train each model a few times
-        for _ in range(400):
+        for _ in range(80):
             self.QA.train()
             self.QA._copy_model()
 
@@ -194,13 +220,43 @@ class TestDQNcont(TestCase):
             self.assertTrue(tf.math.reduce_mean(tf.math.pow(target - q, 2.)) < .2)
             break
 
+    def test_positive_response(self):
+        # load in data:
+        self._load_data(_fake_data_positive_response_cont(num_samples=self.buffer_size,
+                                                          action_dims=2,
+                                                          state_dims=self.state_dims))
+
+        # train each model a few times
+        for _ in range(160):
+            self.QA.train()
+            self.QA._copy_model()
+
+        for v in self.QA._draw_sample().batch(128):
+            # action calc
+            s = tf.math.reduce_sum(v["state"], axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["state"]]), axis=1)
+            # state - action correlation ~ should be high
+            corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
+            self.assertTrue(corr.numpy() > 0.3)
+
+            # correlation with s(t+1)? shouldn't be
+            s = tf.math.reduce_sum(v["state"], axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["state_t1"]]), axis=1)
+            corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
+            self.assertTrue(corr.numpy() < 0.3)
+            break
+
+
 
 if __name__ == "__main__":
+    """
     T = TestDQN()
     T.setUp()
     T.test_dset_build()
     T.test_reward_button()
+    """
     T = TestDQNcont()
     T.setUp()
     T.test_dset_build()
+    T.test_positive_response()
     T.test_reward_button()

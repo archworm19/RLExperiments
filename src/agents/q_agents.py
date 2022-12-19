@@ -314,7 +314,9 @@ class QAgent_cont(Agent):
                  batch_size: int = 128,
                  num_batch_sample: int = 8,
                  train_epoch: int = 1,
-                 var_decay: float = 1.):
+                 var_decay: float = 1.,
+                 critic_lr: float = .001,
+                 actor_lr: float = .001):
         """
         Args:
             run_iface (RunIfaceCont): interface that implements the
@@ -384,8 +386,8 @@ class QAgent_cont(Agent):
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
-        self.kmodel.compile(tf.keras.optimizers.Adam(.001))
-        self.actor_opt = tf.keras.optimizers.Adam(.0001)
+        self.kmodel.compile(tf.keras.optimizers.Adam(critic_lr))
+        self.actor_opt = tf.keras.optimizers.Adam(actor_lr)
 
         # init weights for pi model:
         _ = self.pi_model([inputs[2]])
@@ -442,7 +444,7 @@ class QAgent_cont(Agent):
         # train critic
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=0)
+                                  verbose=1)
 
         # update actor
         # TODO: this is a little diff cuz paper constructin
