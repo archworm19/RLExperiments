@@ -91,24 +91,39 @@ class RunIface:
 class RunIfaceCont:
     # continuous-domain run interface
     # pi_model: pi(a | s)
-    # TODO: action variance vector / matrix?
+    # uses Ornstein-Uhlenbeck process for correlated noise
 
     def __init__(self,
                  bounds: List[Tuple],
-                 action_variance: float,
+                 theta: List[float],
+                 sigma: List[float],
                  rng: npr.Generator):
         # bounds = list of (lower_bound, upper_bound) pairs
         #       for each action dim
+        # theta: momentum term for each action dim
+        # sigma: variance term for each action dim
+        assert len(bounds) == len(theta)
+        assert len(bounds) == len(sigma)
         self.bounds = np.array(bounds)
-        self.action_variance = np.eye(len(self.bounds)) * action_variance
+        self.theta = np.array(theta)
+        self.sigma = np.array(sigma)
+        self.mu = np.zeros((len(bounds)))
+        self.cov = np.eye(len(bounds))
         self.rng = rng
+        # initialize noise at 0
+        self.x_noise = np.zeros((len(self.bounds)))
 
     def _noisify_and_clip(self, x):
-        x = self.rng.multivariate_normal(x, self.action_variance)
-        return np.clip(x, self.bounds[:, 0], self.bounds[:, 1])
+        # update noise:
+        self.x_noise += (self.sigma * np.sqrt(2. * self.theta) *
+                         self.rng.multivariate_normal(self.mu, self.cov) -
+                         self.theta * self.x_noise)
+        return np.clip(x + self.x_noise, self.bounds[:, 0], self.bounds[:, 1])
 
     def init_action(self):
         # returns: List[float]
+        # reset noise
+        self.x_noise = np.zeros((len(self.bounds)))
         mid_pt = np.mean(self.bounds, axis=1)
         return self._noisify_and_clip(mid_pt).tolist()
 
@@ -314,7 +329,6 @@ class QAgent_cont(Agent):
                  batch_size: int = 128,
                  num_batch_sample: int = 8,
                  train_epoch: int = 1,
-                 var_decay: float = 1.,
                  critic_lr: float = .001,
                  actor_lr: float = .001):
         """
@@ -342,8 +356,6 @@ class QAgent_cont(Agent):
             num_batch_sample (int):
                 number of batches to sample for a given training step
             train_epoch (int):
-            var_decay (float): how much variance of action selection decays
-                with each epoch
         """
         super(QAgent_cont, self).__init__()
         self.run_iface = run_iface
@@ -362,7 +374,6 @@ class QAgent_cont(Agent):
         self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
-        self.var_decay = var_decay
 
         inputs = [tf.keras.Input(shape=(action_dims,),
                                  name="action", dtype=tf.float32),
@@ -444,7 +455,7 @@ class QAgent_cont(Agent):
         # train critic
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=1)
+                                  verbose=0)
 
         # update actor
         # TODO: this is a little diff cuz paper constructin
@@ -469,4 +480,5 @@ class QAgent_cont(Agent):
         self.mem_buffer.append(d)
 
     def end_epoch(self):
-        self.run_iface.action_variance = self.run_iface.action_variance * self.var_decay
+        # TODO: consider variance decay system
+        pass

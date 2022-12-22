@@ -82,15 +82,18 @@ def build_dense_qagent_cont(action_bounds: List[float] = [(-1, 1), (-1, 1)],
                        tau: float = 0.15,
                        train_epoch: int = 1,
                        batch_size: int = 128,
-                       init_action_variance: float = 0.15,
-                       var_decay: float = 0.98):
+                       sigma: float = 0.2,
+                       theta: float = 0.15):
     # continious control Q agent
     rng = npr.default_rng(42)
     def build_q():
         return DenseScalar(embed_dim, layer_sizes, drop_rate)
     def build_pi():
         return DenseScalarPi(action_bounds, embed_dim, layer_sizes, drop_rate)
-    run_iface = RunIfaceCont(action_bounds, init_action_variance, rng)
+    run_iface = RunIfaceCont(action_bounds,
+                             [theta] * len(action_bounds),
+                             [sigma] * len(action_bounds),
+                             rng)
     Qa = QAgent_cont(run_iface, build_q, build_pi, rng,
                         len(action_bounds),
                         num_observations,
@@ -99,7 +102,6 @@ def build_dense_qagent_cont(action_bounds: List[float] = [(-1, 1), (-1, 1)],
                         batch_size=batch_size,
                         num_batch_sample=num_batch_sample,
                         train_epoch=train_epoch,
-                        var_decay=var_decay
                         )
     return Qa
 
