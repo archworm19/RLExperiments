@@ -6,11 +6,12 @@ import tensorflow as tf
 from typing import List, Tuple
 from unittest import TestCase
 from tensorflow.keras.layers import Dense, Layer
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel
 from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont
 from arch_layers.simple_networks import DenseNetwork
 
 
-class DenseScalar(Layer):
+class DenseScalar(ScalarModel):
     # simple scalar model
     def __init__(self):
         super(DenseScalar, self).__init__()
@@ -25,7 +26,7 @@ class DenseScalar(Layer):
         return yp[:, 0]  # to scalar
 
 
-class DenseScalarPi(Layer):
+class DenseScalarPi(ScalarStateModel):
     # pi: pi(a | s)
     def __init__(self,
                  bounds: List[Tuple],
@@ -158,8 +159,8 @@ class TestDQNcont(TestCase):
     def setUp(self) -> None:
         rng = npr.default_rng(42)
         bounds = [(-1, 1), (-1, 1)]
-        act_var = 0.1
-        run_iface = RunIfaceCont(bounds, act_var, rng)
+        run_iface = RunIfaceCont(bounds, [0.15] * len(bounds),
+                                 [0.2] * len(bounds), rng)
         def q_builder():
             return DenseScalar()
         def pi_builder():
@@ -249,12 +250,10 @@ class TestDQNcont(TestCase):
 
 
 if __name__ == "__main__":
-    """
     T = TestDQN()
     T.setUp()
     T.test_dset_build()
     T.test_reward_button()
-    """
     T = TestDQNcont()
     T.setUp()
     T.test_dset_build()

@@ -13,6 +13,7 @@ from tensorflow.keras.layers import Layer
 from frameworks.agent import Agent
 from frameworks.q_learning import calc_q_error_sm, calc_q_error_critic, calc_q_error_actor
 from frameworks.custom_model import CustomModel
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel
 from agents.utils import build_action_probes
 from replay_buffers.replay_buffs import MemoryBuffer
 
@@ -45,7 +46,7 @@ class RunIface:
     # factored out of agent to allow for different strategies
     #       ... might not be worth it
 
-    def __init__(self, action_model: Layer,
+    def __init__(self, action_model: ScalarModel,
                  num_actions: int, rand_act_prob: float,
                  rng: npr.Generator):
         self.action_model = action_model
@@ -127,10 +128,10 @@ class RunIfaceCont:
         mid_pt = np.mean(self.bounds, axis=1)
         return self._noisify_and_clip(mid_pt).tolist()
 
-    def select_action(self, model: Layer, state: List[np.ndarray], debug: bool = False):
+    def select_action(self, model: ScalarStateModel, state: List[np.ndarray], debug: bool = False):
         """
         Args:
-            model (Layer): action selection model
+            model (ScalarStateModel): action selection model
             state (List[np.ndarray]): set of unbatched input tensors
                 each with shape:
                     ...
@@ -154,8 +155,8 @@ class QAgent(Agent):
 
     def __init__(self,
                  run_iface: RunIface,
-                 free_model: Layer,
-                 memory_model: Layer,
+                 free_model: ScalarModel,
+                 memory_model: ScalarModel,
                  rng: npr.Generator,
                  num_actions: int,
                  state_dims: int,
@@ -319,8 +320,8 @@ class QAgent_cont(Agent):
 
     def __init__(self,
                  run_iface: RunIfaceCont,
-                 q_model_builder: Callable,
-                 pi_model_builder: Callable,
+                 q_model_builder: Callable[[], ScalarModel],
+                 pi_model_builder: Callable[[], ScalarStateModel],
                  rng: npr.Generator,
                  action_dims: int,
                  state_dims: int,
