@@ -1,13 +1,14 @@
 import numpy.random as npr
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Layer
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel
 from arch_layers.simple_networks import DenseNetwork
 from typing import List, Tuple
 
 from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont
 
 
-class DenseScalar(Layer):
+class DenseScalar(ScalarModel):
     def __init__(self,
                  embed_dim: int,
                  layer_sizes: List[int],
@@ -25,7 +26,7 @@ class DenseScalar(Layer):
         return yp[:, 0]  # to scalar
 
 
-class DenseScalarPi(Layer):
+class DenseScalarPi(ScalarStateModel):
     # pi: pi(a | s)
     def __init__(self,
                  bounds: List[Tuple],

@@ -5,7 +5,7 @@ import numpy.random as npr
 import tensorflow as tf
 from typing import List, Tuple
 from unittest import TestCase
-from tensorflow.keras.layers import Dense, Layer
+from tensorflow.keras.layers import Dense
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel
 from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont
 from arch_layers.simple_networks import DenseNetwork

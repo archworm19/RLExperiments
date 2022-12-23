@@ -39,24 +39,29 @@ class DefaultParams:
 
 class Envs(Enum):
     cartpole = (EnvConfig("CartPole-v1", {}, 2, 4, 1000, False),
-                DefaultParams(0.99, 1.,
-                              8, 128,
-                              2,
-                              10, 10))
+                DefaultParams(0.99, .05,
+                              1, 64,
+                              1,
+                              1, 1))
     lunar = (EnvConfig("LunarLander-v2", {}, 4, 8, 1000, False),
-             DefaultParams(0.99, 1.,
-                           16, 128,
-                           3,
-                           10, 10))
+             DefaultParams(0.99, .05,
+                           1, 64,
+                           1,
+                           1, 1))
     acrobot = (EnvConfig("Acrobot-v1", {}, 3, 6, 200, False),
-               DefaultParams(0.99, 1.,
-                              8, 128,
-                              2,
-                              10, 10))
+               DefaultParams(0.99, .05,
+                              1, 64,
+                              1,
+                              1, 1))
     pendulum = (EnvConfig('Pendulum-v1', {}, 1, 3, 500, True),
                 DefaultParams(0.99, .01,
                               1, 1, 1, 1, 1,
                               [(-2., 2.)]))
+    lunar_continuous = (EnvConfig("LunarLander-v2", {"continuous": True},
+                                  4, 8, 1000, True),
+                        DefaultParams(0.99, .01,
+                                      1, 1, 1, 1, 1,
+                                      [(-1., 1.), (-1., 1.)]))
 
 
 def run_and_train(env_config: EnvConfig,
@@ -123,6 +128,7 @@ if __name__ == "__main__":
     # (env_config, def_params) = Envs.lunar.value
     # (env_config, def_params) = Envs.acrobot.value
     (env_config, def_params) = Envs.pendulum.value
+    # (env_config, def_params) = Envs.lunar_continuous.value
 
     # run
     if env_config.continuous:
