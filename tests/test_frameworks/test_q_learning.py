@@ -5,9 +5,10 @@ from unittest import TestCase
 from tensorflow.keras.layers import Layer, Dense
 from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error_huber,
                                    calc_q_error_critic, calc_q_error_actor)
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel
 
 
-class AModel(Layer):
+class AModel(ScalarModel):
     # returns action_t[:, target_idx]
 
     def __init__(self, target_idx: int):
@@ -95,7 +96,7 @@ class TestQL(TestCase):
                                            tf.round(100 * 0.)))
 
 
-class QModel(Layer):
+class QModel(ScalarModel):
 
     def __init__(self):
         super(QModel, self).__init__()
@@ -106,7 +107,7 @@ class QModel(Layer):
         return action + state[0]
 
 
-class PiModel(Layer):
+class PiModel(ScalarStateModel):
     # returns action_t[:, target_idx]
 
     def __init__(self):

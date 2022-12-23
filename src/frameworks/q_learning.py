@@ -3,6 +3,7 @@
 import tensorflow as tf
 from typing import List
 from tensorflow.keras.layers import Layer
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel
 
 
 # Model-Agnostic Q Error
@@ -55,13 +56,13 @@ def calc_q_error_huber(q_t: tf.Tensor, max_q_t1: tf.Tensor,
 # Model Helpers
 
 
-def _greedy_select(selection_model: Layer,
+def _greedy_select(selection_model: ScalarModel,
                    num_action: int,
                    state_t1: List[tf.Tensor]):
     """greedy action selection using selection model
 
     Args:
-        selection_model (Layer):
+        selection_model (ScalarModel):
         num_action (int):
         state_t1 (List[tf.Tensor]):
             see calc_q_error_sm
@@ -93,9 +94,9 @@ def _greedy_select(selection_model: Layer,
 # Model-Dependent Q calculation
 
 
-def calc_q_error_sm(q_model: Layer,
-                    selection_model: Layer,
-                    eval_model: Layer,
+def calc_q_error_sm(q_model: ScalarModel,
+                    selection_model: ScalarModel,
+                    eval_model: ScalarModel,
                     action_t: tf.Tensor,
                     reward_t1: tf.Tensor,
                     state_t: List[tf.Tensor],
@@ -116,9 +117,9 @@ def calc_q_error_sm(q_model: Layer,
         where a' is greedily chosen by Q_s
 
     Args:
-        q_model (Layer): model that outputs Q(a_t, s_t)
-        selection_model (Layer): model that selects action a'
-        eval_model (Layer): model that calculates Q values for selected action
+        q_model (ScalarModel): model that outputs Q(a_t, s_t)
+        selection_model (ScalarModel): model that selects action a'
+        eval_model (ScalarModel): model that calculates Q values for selected action
             = Q(a', s_{t+1})
             scalar_model assumption ~ applies to q/selection/eval models:
                 call has the following signature:
@@ -154,9 +155,9 @@ def calc_q_error_sm(q_model: Layer,
     return calc_q_error(q_t, max_q_t1, reward_t1, gamma)
 
 
-def calc_q_error_critic(q_model: Layer,
-                        qprime_model: Layer,
-                        piprime_model: Layer,
+def calc_q_error_critic(q_model: ScalarModel,
+                        qprime_model: ScalarModel,
+                        piprime_model: ScalarStateModel,
                         action_t: tf.Tensor,
                         reward_t1: tf.Tensor,
                         state_t: List[tf.Tensor],
@@ -176,9 +177,9 @@ def calc_q_error_critic(q_model: Layer,
     KEY: prime models are frozen here ~ just optimizing Q
 
     Args:
-        q_model (Layer):
-        qprime_model (Layer):
-        piprime_model (Layer):
+        q_model (ScalarModel):
+        qprime_model (ScalarModel):
+        piprime_model (ScalarStateModel):
             q model call signature:
                 call(action: tf.Tensor, state: List[tf.Tensor]) -->
                     tf.Tensor with shape = batch_size
@@ -216,8 +217,8 @@ def calc_q_error_critic(q_model: Layer,
     return calc_q_error(Qval, Q_prime, reward_t1, gamma)
 
 
-def calc_q_error_actor(q_model: Layer,
-                       pi_model: Layer,
+def calc_q_error_actor(q_model: ScalarModel,
+                       pi_model: ScalarStateModel,
                        state_t: List[tf.Tensor]):
     """deterministic policy gradient for action model pi
     return the gradient wrt parameters of model pi
@@ -230,8 +231,8 @@ def calc_q_error_actor(q_model: Layer,
         --> will have to restrict trainable variables downstream
 
     Args:
-        q_model (Layer): no gradient thru critic
-        pi_model (Layer):
+        q_model (ScalarModel): no gradient thru critic
+        pi_model (ScalarStateModel):
         state_t (List[tf.Tensor]): start at time t
             where each 
 
