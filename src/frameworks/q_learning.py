@@ -240,3 +240,92 @@ def calc_q_error_actor(q_model: ScalarModel,
         tf.Tensor: -1 * Q() ~ scalar
     """
     return -1. * tf.math.reduce_mean(q_model(pi_model(state_t), state_t))
+
+
+# Distributional Approach
+
+
+def _redistribute_weight(Vmin: float, Vmax: float,
+                         atoms_probs: tf.Tensor,
+                         reward_t1: tf.Tensor, gamma: float):
+    """> apply distributional Bellman operator (T z_j)
+       > redistribute probability of T z_j
+           follows Bellamere et al, 2017
+
+    Args:
+        Vmin (float):
+        Vmax (float):
+            inclusive
+        num_atoms (int):
+        atoms_probs (tf.Tensor): atom component in probability space
+            batch_size x num_atoms
+            together --> they describe a distribution
+            (can be vizd with histogram)
+        reward_t1 (tf.Tensor): reward at timestep t+1
+            shape = batch_size
+        gamma (float): discount factor
+
+    Returns:
+        tf.Tensor: weights in atom-z space for each batch sample
+            = targets for (weighted) cross-entropy
+            batch_size x num_atoms
+    """
+    num_atoms = tf.cast(tf.shape(atoms_probs)[1], tf.float32)
+    dz = tf.math.divide(Vmax - Vmin, num_atoms - 1.)
+    z = tf.range(Vmin, Vmax + dz, dz)
+
+    # T z_j <-- r_t1 + gamma * z_j
+    # --> batch_size x num_atoms
+    Tz = tf.clip_by_value(tf.expand_dims(reward_t1, axis=1) + gamma * tf.expand_dims(z, axis=0),
+                          Vmin, Vmax)
+
+    # calculate distance from each atom in T z_j
+    # from each atom in z
+    # --> batch_size x num_atoms x num_atoms
+    diff = tf.expand_dims(Tz, 2) - tf.reshape(z, [1, 1, -1])
+    dist = tf.math.abs(diff)  # TODO: not sure I'll need this
+
+    # for atom in T z_j
+    # contributing weight = dz - dist
+    # NOTE: only care about the 2 closest atoms
+    #   to each atom in T z   
+    #   > (dz - dist) >= 0 for 2 closest (given earlier clipping)
+    #   > (dz - dist) < 0 for all other atoms
+    # so: just clip the contributing weights
+    contrib = tf.clip_by_value(dz - dist, 0., dz)
+
+    # scale contributions of each atom in T z_j
+    # by atom's probability
+    weights = tf.math.reduce_sum(contrib * tf.expand_dims(atoms_probs, 1),
+                                 axis=1)
+    return weights
+
+
+if __name__ == "__main__":
+    # TODO: move these to tests
+
+    # trivial example: state to same state due to gamma = 1.
+    # remember: atoms_static (z) is in reward space
+    Vmin = 1.
+    Vmax = 3.
+    atoms_probs = tf.constant([[0.0, 0.0, 1.0],
+                               [1.0, 0.0, 0.0]], dtype=tf.float32)
+    reward = tf.constant([0., 0.])
+    weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
+    print(weights)
+    target = tf.constant([[0, 0, 1],
+                          [1, 0, 0]], dtype=tf.float32)
+    assert tf.math.reduce_all(tf.round(100. * weights) ==
+                              tf.round(100. * target))
+
+    # extreme case: extreme rewards that saturate at Vmin or Vmax
+    v = 1. / 3.
+    atoms_probs = tf.constant([[v, v, v],
+                               [v, v, v]], dtype=tf.float32)
+    reward = tf.constant([-50., 50.])
+    weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
+    print(weights)
+    target = tf.constant([[1, 0, 0],
+                          [0, 0, 1]], dtype=tf.float32)
+    assert tf.math.reduce_all(tf.round(100. * weights) ==
+                              tf.round(100. * target))
