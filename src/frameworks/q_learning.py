@@ -1,7 +1,7 @@
 """Deep Q Learning Frameworks
 """
 import tensorflow as tf
-from typing import Callable, List, Union
+from typing import List
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 
 
@@ -55,16 +55,13 @@ def calc_q_error_huber(q_t: tf.Tensor, max_q_t1: tf.Tensor,
 # Model Helpers
 
 
-def _greedy_select(selection_model: Union[ScalarModel,
-                                          Callable[[tf.Tensor, tf.Tensor], tf.Tensor]],
+def _greedy_select(selection_model: ScalarModel,
                    num_action: int,
                    state_t1: List[tf.Tensor]):
     """greedy action selection using selection model
 
     Args:
-        selection_model (ScalarModel or Scalar model-like):
-            scalar model - like = for (action, state) -->
-            yields tensor with shape batch_size
+        selection_model (ScalarModel):
         num_action (int):
         state_t1 (List[tf.Tensor]):
             see calc_q_error_sm
@@ -287,13 +284,13 @@ def _redistribute_weight(Vmin: float, Vmax: float,
     dist = tf.math.abs(diff)  # TODO: not sure I'll need this
 
     # for atom in T z_j
-    # contributing weight = dz - dist
+    # contributing weight = (dz - dist) / dz
     # NOTE: only care about the 2 closest atoms
     #   to each atom in T z   
     #   > (dz - dist) >= 0 for 2 closest (given earlier clipping)
     #   > (dz - dist) < 0 for all other atoms
     # so: just clip the contributing weights
-    contrib = tf.clip_by_value(dz - dist, 0., dz)
+    contrib = tf.math.divide(tf.clip_by_value(dz - dist, 0., dz), dz)
 
     # scale contributions of each atom in T z_j
     # by atom's probability
@@ -361,7 +358,7 @@ def _calc_q_from_distro(Vmin: float, Vmax: float,
 
 
 def calc_q_error_distro_discrete(q_model: DistroModel,
-                                 selection_model: DistroModel,
+                                 selection_model: ScalarModel,
                                  eval_model: DistroModel,
                                  Vmin: float,
                                  Vmax: float,
@@ -386,7 +383,10 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
 
     Args:
         q_model (DistroModel):
-        selection_model (DistroModel):
+        selection_model (DistroModel): yields Q value for each
+            batch sample ~ used to greedily select action
+            NOTE: typically: take expectation over distribution
+                model
         eval_model (DistroModel):
             NOTE: models are assumed to be unnormalized
             --> apply softmax to outputs to get
@@ -406,12 +406,10 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     Returns:
         tf.Tensor: Q error
             shape = batch_size
+        tf.Tensor: weights
     """
     # greedy selection
-    def exp_model(action, state):
-        probs = selection_model(action, state)
-        return _calc_q_from_distro(Vmin, Vmax, probs)
-    max_a, _ = _greedy_select(exp_model, num_action, state_t1)
+    max_a, _ = _greedy_select(selection_model, num_action, state_t1)
     max_a_vector = tf.one_hot(max_a, num_action)
 
     # apply Bellman operator --> target (weights of X-entropy)
@@ -423,7 +421,7 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     # termination
     # if termination bit --> weights = vector0
     term = tf.expand_dims(termination, 1)
-    weights = (1 - term) * weights + term * tf.expand_dims(vector0, 1)
+    weights = (1 - term) * weights + term * tf.expand_dims(vector0, 0)
 
     # x-entropy with weights as targets
     # model outputs v_i
@@ -433,42 +431,4 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     #   = - sum_i [ weight_i * v_i ] + log_sum_exp(V)
     atoms_v_q = q_model(action_t, state_t)
     return (tf.math.reduce_logsumexp(atoms_v_q, axis=1) -
-            tf.math.reduce_sum(weights * atoms_v_q, axis=1))
-
-
-if __name__ == "__main__":
-    # TODO: move these to tests
-
-    # trivial example: state to same state due to gamma = 1.
-    # remember: atoms_static (z) is in reward space
-    Vmin = 1.
-    Vmax = 3.
-    atoms_probs = tf.constant([[0.0, 0.0, 1.0],
-                               [1.0, 0.0, 0.0]], dtype=tf.float32)
-    reward = tf.constant([0., 0.])
-    weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
-    print(weights)
-    target = tf.constant([[0, 0, 1],
-                          [1, 0, 0]], dtype=tf.float32)
-    assert tf.math.reduce_all(tf.round(100. * weights) ==
-                              tf.round(100. * target))
-    Q = _calc_q_from_distro(Vmin, Vmax, atoms_probs)
-    Q_target = tf.constant([3., 1.])
-    assert tf.math.reduce_all(tf.round(100. * Q) ==
-                              tf.round(100. * Q_target))
-
-    # extreme case: extreme rewards that saturate at Vmin or Vmax
-    v = 1. / 3.
-    atoms_probs = tf.constant([[v, v, v],
-                               [v, v, v]], dtype=tf.float32)
-    reward = tf.constant([-50., 50.])
-    weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
-    print(weights)
-    target = tf.constant([[1, 0, 0],
-                          [0, 0, 1]], dtype=tf.float32)
-    assert tf.math.reduce_all(tf.round(100. * weights) ==
-                              tf.round(100. * target))
-    Q = _calc_q_from_distro(Vmin, Vmax, atoms_probs)
-    Q_target = tf.constant([2., 2.])
-    assert tf.math.reduce_all(tf.round(100. * Q) ==
-                              tf.round(100. * Q_target))
+            tf.math.reduce_sum(weights * atoms_v_q, axis=1)), weights

@@ -2,10 +2,12 @@
 import tensorflow as tf
 from typing import List
 from unittest import TestCase
-from tensorflow.keras.layers import Layer, Dense
+from tensorflow.keras.layers import Dense
 from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error_huber,
-                                   calc_q_error_critic, calc_q_error_actor)
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel
+                                   calc_q_error_critic, calc_q_error_actor,
+                                   _redistribute_weight, _calc_q_from_distro,
+                                   calc_q_error_distro_discrete)
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 
 
 class AModel(ScalarModel):
@@ -176,6 +178,110 @@ class TestQLcont(TestCase):
         self.assertTrue(Qfin > Q0)
 
 
+class TestDistroQ(TestCase):
+    # shared components in distribution-based Q learning
+
+    def test_trivial(self):
+        # trivial example: state to same state due to gamma = 1.
+        # remember: atoms_static (z) is in reward space
+        Vmin = 1.
+        Vmax = 3.
+        atoms_probs = tf.constant([[0.0, 0.0, 1.0],
+                                [1.0, 0.0, 0.0]], dtype=tf.float32)
+        reward = tf.constant([0., 0.])
+        weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
+        target = tf.constant([[0, 0, 1],
+                            [1, 0, 0]], dtype=tf.float32)
+        assert tf.math.reduce_all(tf.round(100. * weights) ==
+                                tf.round(100. * target))
+        Q = _calc_q_from_distro(Vmin, Vmax, atoms_probs)
+        Q_target = tf.constant([3., 1.])
+        assert tf.math.reduce_all(tf.round(100. * Q) ==
+                                tf.round(100. * Q_target))
+
+    def test_extreme(self):
+        # extreme case: extreme rewards that saturate at Vmin or Vmax
+        Vmin = 1.
+        Vmax = 3.
+        v = 1. / 3.
+        atoms_probs = tf.constant([[v, v, v],
+                                [v, v, v]], dtype=tf.float32)
+        reward = tf.constant([-50., 50.])
+        weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
+        target = tf.constant([[1, 0, 0],
+                            [0, 0, 1]], dtype=tf.float32)
+        assert tf.math.reduce_all(tf.round(100. * weights) ==
+                                tf.round(100. * target))
+        Q = _calc_q_from_distro(Vmin, Vmax, atoms_probs)
+        Q_target = tf.constant([2., 2.])
+        assert tf.math.reduce_all(tf.round(100. * Q) ==
+                                tf.round(100. * Q_target))
+
+
+class QModelUniformD(DistroModel):
+    # returns constant K
+
+    def __init__(self, num_atoms: int = 5, K: int = 1.):
+        super(QModelUniformD, self).__init__()
+        self.num_atoms = num_atoms
+        self.v = tf.reshape(tf.constant([K] * num_atoms, tf.float32), [1, -1])
+
+    def call(self, action: tf.Tensor, state: List[tf.Tensor]):
+        # --> batch_size x num_atoms
+        return tf.tile(self.v, [tf.shape(action)[0], 1])
+
+
+class expQDist(ScalarModel):
+    # expectation across a distro model
+
+    def __init__(self, qdist: QModelUniformD, Vmin: float, Vmax: float):
+        super(expQDist, self).__init__()
+        self.Vmin = Vmin
+        self.Vmax = Vmax
+        self.qdist = qdist
+
+    def call(self, action: tf.Tensor, state: List[tf.Tensor]):
+        v = self.qdist(action, state)
+        atom_probs = tf.nn.softmax(v, axis=1)
+        return _calc_q_from_distro(self.Vmin, self.Vmax, atom_probs)
+
+
+class TestDistroQdiscrete(TestCase):
+    # distributional approach + discrete control
+
+    def test_q_err(self):
+        # same model + rewards + (gamma=1) = 0 -->
+        # weights proportional to probs?
+        num_atoms = 11
+        gamma = 1.
+        Q = QModelUniformD(num_atoms)
+        Vmin = -10.
+        Vmax = 10.
+        Qexp = expQDist(Q, Vmin, Vmax)
+        action = tf.constant([[1, 0, 0, 0],
+                              [0, 1, 0, 0]], tf.float32)
+        reward = tf.constant([0., 0.], tf.float32)
+        state = [tf.constant([0., 0.], tf.float32)]
+        term = tf.constant([0, 0,], tf.float32)
+        # 0 representation vector = which atom is active
+        #   when reward = 0?
+        v0 = [0] * num_atoms
+        v0[6] = 1
+        vector0 = tf.constant(v0, tf.float32)
+        Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
+                                                     Vmin, Vmax,
+                                                     action, reward,
+                                                     state, state,
+                                                     term, 4, gamma,
+                                                     vector0)
+        weights_target = tf.ones([2, num_atoms]) * (1. / num_atoms)
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * weights) ==
+                                           tf.round(100. * weights_target)))
+        Qerr_target = -1. * tf.math.log(tf.math.divide(tf.ones(2), num_atoms))
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * Qerr) ==
+                                           tf.round(100. * Qerr_target)))
+
+
 if __name__ == "__main__":
     T = TestHuber()
     T.test_huber()
@@ -188,3 +294,8 @@ if __name__ == "__main__":
     T.test_positive_control()
     T.test_negative_control()
     T.test_actor_grad()
+    T = TestDistroQ()
+    T.test_trivial()
+    T.test_extreme()
+    T = TestDistroQdiscrete()
+    T.test_q_err()
