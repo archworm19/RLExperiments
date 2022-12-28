@@ -281,6 +281,44 @@ class TestDistroQdiscrete(TestCase):
         self.assertTrue(tf.math.reduce_all(tf.round(100. * Qerr) ==
                                            tf.round(100. * Qerr_target)))
 
+    def test_shift(self):
+        # shift atoms over N using reward (keep gamma constant at 1)
+        num_atoms = 11
+        gamma = 1.
+        Q = QModelUniformD(num_atoms)
+        Vmin = -10.
+        Vmax = 10.
+        Qexp = expQDist(Q, Vmin, Vmax)
+        action = tf.constant([[1, 0, 0, 0],
+                              [0, 1, 0, 0]], tf.float32)
+        state = [tf.constant([0., 0.], tf.float32)]
+        term = tf.constant([0, 0,], tf.float32)
+        # 0 representation vector = which atom is active
+        #   when reward = 0?
+        v0 = [0] * num_atoms
+        v0[6] = 1
+        vector0 = tf.constant(v0, tf.float32)
+        for i in range(5):
+            z = ((Vmax - Vmin) / (num_atoms - 1)) * i
+            reward = tf.constant([z, z], tf.float32)
+            Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
+                                                        Vmin, Vmax,
+                                                        action, reward,
+                                                        state, state,
+                                                        term, 4, gamma,
+                                                        vector0)
+            wt = [0] * i + [1. / num_atoms] * (num_atoms - i)
+            wt[-1] = wt[-1] * (i + 1)
+            weights_target = tf.constant([wt, wt], tf.float32)
+            self.assertTrue(tf.math.reduce_all(tf.round(100. * weights) ==
+                                            tf.round(100. * weights_target)))
+            # Qerr?
+            # -1 * sum [w_i * k] = -1 * k (cuz weights sum to 1)
+            # where k = log(1. / num_atoms)
+            Qerr_target = -1. * tf.math.log(tf.math.divide(tf.ones(2), num_atoms))
+            self.assertTrue(tf.math.reduce_all(tf.round(100. * Qerr) ==
+                                            tf.round(100. * Qerr_target)))
+
 
 if __name__ == "__main__":
     T = TestHuber()
@@ -299,3 +337,4 @@ if __name__ == "__main__":
     T.test_extreme()
     T = TestDistroQdiscrete()
     T.test_q_err()
+    T.test_shift()
