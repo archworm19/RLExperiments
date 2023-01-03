@@ -124,10 +124,10 @@ def run_and_train(env_config: EnvConfig,
 
 
 if __name__ == "__main__":
-    # (env_config, def_params) = Envs.cartpole.value
+    (env_config, def_params) = Envs.cartpole.value
     # (env_config, def_params) = Envs.lunar.value
     # (env_config, def_params) = Envs.acrobot.value
-    (env_config, def_params) = Envs.pendulum.value
+    # (env_config, def_params) = Envs.pendulum.value
     # (env_config, def_params) = Envs.lunar_continuous.value
 
     # run

@@ -60,11 +60,11 @@ def build_dense_qagent(num_actions: int = 4,
                        train_epoch: int = 1,
                        batch_size: int = 128):
     rng = npr.default_rng(42)
-    free_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
-    memory_model = DenseScalar(embed_dim, layer_sizes, drop_rate)
-    run_iface = RunIface(memory_model, num_actions, 1., rng)
+    def build_q():
+        return DenseScalar(embed_dim, layer_sizes, drop_rate)
+    run_iface = RunIface(num_actions, 1., rng)
     return QAgent(run_iface,
-                  free_model, memory_model,
+                  build_q,
                   rng,
                   num_actions, num_observations, gamma=gamma,
                   tau=tau,

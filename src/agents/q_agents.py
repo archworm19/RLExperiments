@@ -40,16 +40,18 @@ def copy_model(send_model: Layer, rec_model: Layer,
     rec_model.set_weights(new_weights)
 
 
+# Run Interfaces
+
+
 class RunIface:
     # handles interfacing with simulation
     # build other models on top of this
     # factored out of agent to allow for different strategies
     #       ... might not be worth it
 
-    def __init__(self, action_model: ScalarModel,
+    def __init__(self,
                  num_actions: int, rand_act_prob: float,
                  rng: npr.Generator):
-        self.action_model = action_model
         self.num_actions = num_actions
         self.rand_act_prob = rand_act_prob
         self.rng = rng
@@ -57,10 +59,12 @@ class RunIface:
     def init_action(self):
         return self.rng.integers(0, self.num_actions)
 
-    def select_action(self, state: List[np.ndarray], debug: bool = False):
+    def select_action(self, model: ScalarModel, state: List[np.ndarray], debug: bool = False):
         """greedy action selection
 
         Args:
+            model (ScalarModel): model that outputs Q evaluations for state-action
+                pairs
             state (List[np.ndarray]): set of unbatched input tensors
                 each with shape:
                     ...
@@ -76,7 +80,7 @@ class RunIface:
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
         # --> shape = num_actions
-        scores = self.action_model(action_t, state_t)
+        scores = model(action_t, state_t)
 
         if debug:
             print('action; state; scores')
@@ -150,13 +154,15 @@ class RunIfaceCont:
         return a_noise
 
 
+# Agents
+
+
 class QAgent(Agent):
     # double DQN
 
     def __init__(self,
                  run_iface: RunIface,
-                 free_model: ScalarModel,
-                 memory_model: ScalarModel,
+                 model_builder: Callable[[], ScalarModel],
                  rng: npr.Generator,
                  num_actions: int,
                  state_dims: int,
@@ -166,9 +172,6 @@ class QAgent(Agent):
                  num_batch_sample: int = 8,
                  train_epoch: int = 1,
                  rand_act_decay: float = 0.95):
-        # TODO: eval_model and selection_model must be the same
-        # underlying model (with different weights)
-        # TODO/FIX: take in builder instead
         """
         Core Bellman Eqn:
             Q_f = free model
@@ -211,8 +214,8 @@ class QAgent(Agent):
                                         "state", "state_t1",
                                         "termination"], rng,
                                         500000)
-        self.free_model = free_model
-        self.memory_model = memory_model
+        self.free_model = model_builder()
+        self.memory_model = model_builder()
         self.num_actions = num_actions
         self.gamma = gamma
         self.tau = tau
@@ -268,7 +271,7 @@ class QAgent(Agent):
         Returns:
             int: index of selected action
         """
-        return self.run_iface.select_action(state, debug=debug)
+        return self.run_iface.select_action(self.memory_model, state, debug=debug)
 
     def _copy_model(self, debug: bool = False):
         # copy weights from free_model to memory_model
