@@ -11,9 +11,10 @@ import tensorflow as tf
 from typing import List, Union, Callable, Tuple
 from tensorflow.keras.layers import Layer
 from frameworks.agent import Agent
-from frameworks.q_learning import calc_q_error_sm, calc_q_error_critic, calc_q_error_actor
+from frameworks.q_learning import (calc_q_error_sm, calc_q_error_critic, calc_q_error_actor,
+                                   calc_q_error_distro_discrete, _calc_q_from_distro)
 from frameworks.custom_model import CustomModel
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 from agents.utils import build_action_probes
 from replay_buffers.replay_buffs import MemoryBuffer
 
@@ -315,6 +316,171 @@ class QAgent(Agent):
 
     def end_epoch(self):
         self.run_iface.rand_act_prob *= self.rand_act_decay
+
+
+class ExpModel(ScalarModel):
+    # expectation model:
+    # > wraps Distro Model
+    # > Distro Model outputs unnormalized probabilities
+    # > use probabilities + Vmin + Vmax to produce expected q value
+    #       = expectation across distro
+
+    def __init__(self, Vmin: float, Vmax: float, distro_model: DistroModel):
+        super(ExpModel, self).__init__()
+        self.Vmin = Vmin
+        self.Vmax = Vmax
+        self.model = distro_model
+
+    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]) -> tf.Tensor:
+        """
+        Args:
+            action_t (tf.Tensor): action
+                batch_size x ...
+            state_t (List[tf.Tensor]): set of states
+                each tensor is:
+                    batch_size x ...
+
+        Returns:
+            tf.Tensor: shape = batch_size
+        """
+        # --> batch_size x dim
+        d = self.model(action_t, state_t)
+        p = tf.nn.softmax(d, axis=1)
+        return _calc_q_from_distro(self.Vmin, self.Vmax, p)
+
+
+class QAgent_distro(Agent):
+    # distributional approach
+    # discrete control
+
+    def __init__(self,
+                 run_iface: RunIface,
+                 model_builder: Callable[[], ScalarModel],
+                 rng: npr.Generator,
+                 num_actions: int,
+                 state_dims: int,
+                 vector0: tf.Tensor,
+                 gamma: float = 0.7,
+                 tau: float = 0.01,
+                 Vmin: float = -20.,
+                 Vmax: float = 20.,
+                 batch_size: int = 128,
+                 num_batch_sample: int = 8,
+                 train_epoch: int = 1,
+                 rand_act_decay: float = 0.95):
+        # see QAgent docstring
+        # TODO: additional fields: Vmin, Vmax, vector0
+        super(QAgent, self).__init__()
+        self.run_iface = run_iface
+        self.mem_buffer = MemoryBuffer(["action", "reward",
+                                        "state", "state_t1",
+                                        "termination"], rng,
+                                        500000)
+        self.free_model = model_builder()
+        self.memory_model = model_builder()
+        # TODO: correct model?
+        self.exp_model = ExpModel(Vmin, Vmax, self.memory_model)
+        self.num_actions = num_actions
+        self.gamma = gamma
+        self.tau = tau
+        self.batch_size = batch_size
+        self.num_batch_sample = num_batch_sample
+        self.train_epoch = train_epoch
+        self.rng = rng
+        self.rand_act_decay = rand_act_decay
+
+        inputs = [tf.keras.Input(shape=(num_actions,),
+                                 name="action", dtype=tf.float32),
+                  tf.keras.Input(shape=(),
+                                 name="reward", dtype=tf.float32),
+                  tf.keras.Input(shape=(state_dims,),
+                                 name="state", dtype=tf.float32),
+                  tf.keras.Input(shape=(state_dims,),
+                                 name="state_t1", dtype=tf.float32),
+                  tf.keras.Input(shape=(),
+                                 name="termination", dtype=tf.float32)]
+        # loss ~ discrete Q error framework
+        Q_err, _ = calc_q_error_distro_discrete(self.free_model, self.exp_model, self.memory_model,
+                                                Vmin, Vmax,
+                                                inputs[0], inputs[1],
+                                                [inputs[2]], [inputs[3]],
+                                                inputs[4],
+                                                self.num_actions, self.gamma,
+                                                vector0)   
+        self.kmodel = CustomModel("loss",
+                                  inputs=inputs,
+                                  outputs={"loss": tf.math.reduce_mean(Q_err)})
+        self.kmodel.compile(tf.keras.optimizers.Adam(.001))
+
+        self.run_iface.rand_act_prob = 1.
+
+        # align the models
+        tau_hold = self.tau
+        self.tau = 1.
+        self._copy_model()
+        self.tau = tau_hold
+
+    def init_action(self):
+        return self.run_iface.init_action()
+
+    def select_action(self, state: List[np.ndarray], debug: bool = False):
+        """greedy action selection
+
+        Args:
+            state (List[np.ndarray]): set of unbatched input tensors
+                each with shape:
+                    ...
+
+        Returns:
+            int: index of selected action
+        """
+        return self.run_iface.select_action(self.exp_model, state, debug=debug)
+
+    def _copy_model(self, debug: bool = False):
+        # copy weights from free_model to memory_model
+        #   approximation of updating the Q table
+        # according to: memory <- tau * free + (1 - tau) * memory
+        #   NOTE: tau should probably be pretty small
+        copy_model(self.free_model, self.memory_model, self.tau)
+
+    def _draw_sample(self):
+        d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
+        d = {k: np.array(d[k]) for k in d}
+        # TODO: kinda meh design
+        d["action"] = _one_hot(d["action"].astype(np.int32), self.num_actions)
+        return tf.data.Dataset.from_tensor_slices(d)
+
+    def train(self, debug: bool = False):
+        """train agent on run data
+
+        Args:
+            run_data (RunData):
+        """
+        dset = self._draw_sample()
+        history = self.kmodel.fit(dset.batch(self.batch_size),
+                                  epochs=self.train_epoch,
+                                  verbose=0)
+        return history
+
+    def save_data(self,
+                  state: List[List[float]],
+                  state_t1: List[List[float]],
+                  action: Union[int, float, List],
+                  reward: float,
+                  termination: bool):
+        # NOTE: only saves a single step
+        d = {"state": state[0],
+             "state_t1": state_t1[0],
+             "action": action,
+             "reward": reward,
+             "termination": termination}
+        self.mem_buffer.append(d)
+
+    def end_epoch(self):
+        self.run_iface.rand_act_prob *= self.rand_act_decay
+
+
+# Continuous Agents
 
 
 class QAgent_cont(Agent):

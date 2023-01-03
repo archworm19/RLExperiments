@@ -10,7 +10,7 @@ class ScalarModel(Layer):
     def __init__(self):
         super(ScalarModel, self).__init__()
 
-    def call(action_t: tf.Tensor, state_t: List[tf.Tensor]) -> tf.Tensor:
+    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]) -> tf.Tensor:
         """
         Args:
             action_t (tf.Tensor): action
@@ -30,7 +30,7 @@ class ScalarStateModel(Layer):
     def __init__(self):
         super(ScalarStateModel, self).__init__()
 
-    def call(state_t: List[tf.Tensor]) -> tf.Tensor:
+    def call(self, state_t: List[tf.Tensor]) -> tf.Tensor:
         """
         Args:
             state_t (List[tf.Tensor]): set of states
@@ -49,7 +49,7 @@ class DistroModel(Layer):
     def __init__(self):
         super(DistroModel, self).__init__()
 
-    def call(action_t: tf.Tensor, state_t: List[tf.Tensor]) -> tf.Tensor:
+    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]) -> tf.Tensor:
         """
         Args:
             action_t (tf.Tensor): action
