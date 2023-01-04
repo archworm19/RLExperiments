@@ -6,8 +6,8 @@ import tensorflow as tf
 from typing import List, Tuple
 from unittest import TestCase
 from tensorflow.keras.layers import Dense
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel
-from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
+from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont, QAgent_distro
 from arch_layers.simple_networks import DenseNetwork
 
 
@@ -47,6 +47,21 @@ class DenseScalarPi(ScalarStateModel):
         raw_act = self.d_out(yp)
         # apply bounds via sigmoid:
         return (self.ranges * tf.math.sigmoid(raw_act)) + self.offset
+
+
+class DenseDistro(DistroModel):
+    # number of atoms = 5
+    def __init__(self):
+        super(DenseDistro, self).__init__()
+        self.d_act = Dense(4)
+        self.d_state = Dense(4)
+        self.net = DenseNetwork([10], 5, 0.)
+
+    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
+        x_a = self.d_act(action_t)
+        x_s = self.d_state(state_t[0])
+        yp = self.net(tf.concat([x_a, x_s], axis=1))
+        return yp   # --> batch_size x num_atoms (5)
 
 
 def _fake_data_reward_button(num_samples: int = 5000,
@@ -95,11 +110,12 @@ def _fake_data_positive_response_cont(num_samples: int = 5000,
 class TestDQN(TestCase):
 
     def setUp(self) -> None:
-        eval_model = DenseScalar()
         rng = npr.default_rng(42)
-        run_iface = RunIface(eval_model, 2, 0.25, rng)
+        run_iface = RunIface(2, 0.25, rng)
+        def q_builder():
+            return DenseScalar()
         self.QA = QAgent(run_iface,
-                         eval_model, DenseScalar(),
+                         q_builder,
                          rng,
                          2, 2,
                          gamma=0.9,
@@ -122,7 +138,7 @@ class TestDQN(TestCase):
             break
 
     def test_reward_button(self):
-        # train each model a few times
+        # train model a few times
         for _ in range(200):
             self.QA.train()
             self.QA._copy_model()
@@ -151,6 +167,51 @@ class TestDQN(TestCase):
             print(q)
             self.assertAlmostEqual(exp_q, q_rew, places=1)
             self.assertAlmostEqual(exp_q - self.r, q_no, places=1)
+            break
+
+
+class TestDQNdistro(TestCase):
+
+    def setUp(self) -> None:
+        rng = npr.default_rng(42)
+        run_iface = RunIface(2, 0.25, rng)
+        def q_builder():
+            return DenseDistro()
+        # assumes 5 atoms
+        vector0 = tf.constant([0, 0, 1, 0, 0], tf.float32)
+        self.QA = QAgent_distro(run_iface,
+                                q_builder,
+                                rng,
+                                2, 2,
+                                vector0,
+                                gamma=0.95,
+                                tau=.2)
+        # load in data:
+        self.r = 2
+        dat = _fake_data_reward_button(100, r=self.r)
+        for i in range(len(dat[0])):
+            self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
+                              dat[3][i], dat[4][i])
+
+    def test_reward_button(self):
+        # train model a few times
+        for _ in range(200):
+            self.QA.train()
+            self.QA._copy_model()
+
+        # reward button: if learn correct action --> can get 1 reward with
+        #       each step
+        #       assuming high enough gamma --> expected reward > Vmax
+        #           --> check that outputs are approx= [0, 0, 0, 0, 1]
+        #           for all samples
+        for v in self.QA._draw_sample().batch(32):
+            # test probability vector
+            atom_probs = tf.nn.softmax(self.QA.memory_model(v["action"], [v["state"]]), axis=1)
+            self.assertTrue(tf.math.reduce_all(atom_probs[:, -1] >= 0.9))
+
+            # test model expectation
+            exp_q = self.QA.exp_model(v["action"], [v["state"]])
+            self.assertTrue(tf.math.reduce_all(tf.math.abs(20. - exp_q) < 1.5))
             break
 
 
@@ -248,7 +309,6 @@ class TestDQNcont(TestCase):
             break
 
 
-
 if __name__ == "__main__":
     T = TestDQN()
     T.setUp()
@@ -258,4 +318,7 @@ if __name__ == "__main__":
     T.setUp()
     T.test_dset_build()
     T.test_positive_response()
+    T.test_reward_button()
+    T = TestDQNdistro()
+    T.setUp()
     T.test_reward_button()
