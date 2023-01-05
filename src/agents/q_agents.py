@@ -325,11 +325,15 @@ class ExpModel(ScalarModel):
     # > use probabilities + Vmin + Vmax to produce expected q value
     #       = expectation across distro
 
-    def __init__(self, Vmin: float, Vmax: float, distro_model: DistroModel):
+    def __init__(self, Vmin: float, Vmax: float, distro_model: DistroModel,
+                 r_std_dev: float = 0.0):
+        # r_std_dev: standard deviation of random value added to expectation score
+        #       used to break ties in random fashion
         super(ExpModel, self).__init__()
         self.Vmin = Vmin
         self.Vmax = Vmax
         self.model = distro_model
+        self.r_std_dev = r_std_dev
 
     def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]) -> tf.Tensor:
         """
@@ -346,7 +350,8 @@ class ExpModel(ScalarModel):
         # --> batch_size x dim
         d = self.model(action_t, state_t)
         p = tf.nn.softmax(d, axis=1)
-        return _calc_q_from_distro(self.Vmin, self.Vmax, p)
+        q = _calc_q_from_distro(self.Vmin, self.Vmax, p)
+        return q + tf.random.normal(tf.shape(q), stddev=self.r_std_dev)
 
 
 class QAgent_distro(Agent):
@@ -379,7 +384,8 @@ class QAgent_distro(Agent):
         self.free_model = model_builder()
         self.memory_model = model_builder()
         # TODO: correct model?
-        self.exp_model = ExpModel(Vmin, Vmax, self.memory_model)
+        self.exp_model = ExpModel(Vmin, Vmax, self.memory_model,
+                                  r_std_dev=.0001)
         self.num_actions = num_actions
         self.gamma = gamma
         self.tau = tau
@@ -409,7 +415,8 @@ class QAgent_distro(Agent):
                                                 vector0)   
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_mean(Q_err)})
+                                  outputs={"loss": tf.math.reduce_mean(Q_err),
+                                           "full_loss": Q_err})  # TODO: TESTING
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
 
         self.run_iface.rand_act_prob = 1.
@@ -457,15 +464,9 @@ class QAgent_distro(Agent):
             run_data (RunData):
         """
         dset = self._draw_sample()
-
-        # TODO/TESTING:
-        for v in dset.batch(self.batch_size):
-            print(v)
-        input("cont?")
-
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=1)
+                                  verbose=0)
         return history
 
     def save_data(self,

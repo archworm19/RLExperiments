@@ -146,6 +146,9 @@ if __name__ == "__main__":
         # TESTING: distributional approach
         agent = build_dense_qagent_distro(num_actions=env_config.num_actions,
                                    num_observations=env_config.num_obs,
+                                   Vmin=-25.,
+                                   Vmax=25.,
+                                   num_atoms=51,
                                    layer_sizes=[128, 64],
                                    drop_rate=0.05,
                                    gamma=def_params.gamma,
@@ -157,5 +160,5 @@ if __name__ == "__main__":
                                seed_runs=5,
                                step_per_train=def_params.step_per_train,
                                step_per_copy=def_params.step_per_copy,
-                               debug_viz=True)
+                               debug_viz=False)
     print(reward_seq)

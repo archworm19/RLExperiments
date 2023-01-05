@@ -1,6 +1,7 @@
 import numpy.random as npr
+import numpy as np
 import tensorflow as tf
-from tensorflow.keras.layers import Dense, Layer
+from tensorflow.keras.layers import Dense
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 from arch_layers.simple_networks import DenseNetwork
 from typing import List, Tuple
@@ -54,18 +55,21 @@ class DenseDistro(DistroModel):
                  embed_dim: int,
                  layer_sizes: List[int],
                  drop_rate: float,
-                 num_atoms: int = 51):
+                 num_atoms: int = 51,
+                 sigmoid_scale: float = 20.):
+        # NOTE: use sigmoid_scale to avoid overflows
         super(DenseDistro, self).__init__()
         self.d_act = Dense(embed_dim)
         self.d_state = Dense(embed_dim)
         self.net = DenseNetwork(layer_sizes, num_atoms, drop_rate)
+        self.sigmoid_scale = sigmoid_scale
 
     def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
         # NOTE: only uses 0th tensor in state_t
         x_a = self.d_act(action_t)
         x_s = self.d_state(state_t[0])
         yp = self.net(tf.concat([x_a, x_s], axis=1))
-        return yp
+        return (tf.math.sigmoid(yp) - 0.5) * self.sigmoid_scale
 
 
 def build_dense_qagent(num_actions: int = 4,
@@ -129,6 +133,8 @@ def build_dense_qagent_cont(action_bounds: List[float] = [(-1, 1), (-1, 1)],
 def build_dense_qagent_distro(num_actions: int = 4,
                               num_observations: int = 8,
                               num_atoms: int = 51,
+                              Vmin: float = -20.,
+                              Vmax: float = 20.,
                               embed_dim: int = 4,
                               layer_sizes: List[int] = [32, 16],
                               drop_rate: float = 0.1,
@@ -138,18 +144,24 @@ def build_dense_qagent_distro(num_actions: int = 4,
                               train_epoch: int = 1,
                               batch_size: int = 128):
     # discrete control + distribution approach
+    # middle atom = index of middle atom
+    #       Ex: if 0 --> right skewed distro
     rng = npr.default_rng(42)
     def build_q():
         return DenseDistro(embed_dim, layer_sizes, drop_rate, num_atoms)
     run_iface = RunIface(num_actions, 1., rng)
-    n1 = int(num_atoms / 2)
-    vector0 = tf.constant([0] * n1 + [1] + [0] * (num_atoms - (n1 + 1)),
+    ind0 = np.argmin(np.fabs(np.linspace(Vmin, Vmax, num_atoms)))
+    v0 = [0] * num_atoms
+    v0[ind0] = 1.
+    vector0 = tf.constant(v0,
                           tf.float32)
     return QAgent_distro(run_iface,
                          build_q,
                          rng,
                          num_actions, num_observations,
                          vector0,
+                         Vmin=Vmin,
+                         Vmax=Vmax,
                          gamma=gamma,
                          tau=tau,
                          num_batch_sample=num_batch_sample,

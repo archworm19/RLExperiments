@@ -400,7 +400,6 @@ class TestDistroQdiscrete(TestCase):
                                             tf.round(100. * Qerr_target)))
 
 
-
 if __name__ == "__main__":
     T = TestHuber()
     T.test_huber()
