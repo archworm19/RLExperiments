@@ -164,7 +164,6 @@ class TestDQN(TestCase):
             q = self.QA.memory_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
-            print(q)
             self.assertAlmostEqual(exp_q, q_rew, places=1)
             self.assertAlmostEqual(exp_q - self.r, q_no, places=1)
             break
@@ -211,6 +210,7 @@ class TestDQNdistro(TestCase):
 
             # test model expectation
             exp_q = self.QA.exp_model(v["action"], [v["state"]])
+            print(exp_q)
             self.assertTrue(tf.math.reduce_all(tf.math.abs(20. - exp_q) < 1.5))
             break
 
