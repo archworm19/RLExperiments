@@ -231,6 +231,18 @@ class QModelUniformD(DistroModel):
         return tf.tile(self.v, [tf.shape(action)[0], 1])
 
 
+class QModelConstantD(DistroModel):
+    # returns specified vector v tiled to correct shape
+
+    def __init__(self, v: tf.Tensor):
+        super(QModelConstantD, self).__init__()
+        self.v = tf.reshape(v, [1, -1])
+
+    def call(self, action: tf.Tensor, state: List[tf.Tensor]):
+        # --> batch_size x num_atoms
+        return tf.tile(self.v, [tf.shape(action)[0], 1])
+
+
 class expQDist(ScalarModel):
     # expectation across a distro model
 
@@ -319,6 +331,40 @@ class TestDistroQdiscrete(TestCase):
             self.assertTrue(tf.math.reduce_all(tf.round(100. * Qerr) ==
                                             tf.round(100. * Qerr_target)))
 
+    def test_termination(self):
+        # actions and states identical
+        # termination bit different
+        # Q model outputs the vector0 --> error should be minimized
+        #       when termination bit supplied
+        num_atoms = 11
+        gamma = 1.
+        # 0 representation vector = which atom is active
+        #   when reward = 0?
+        v0 = [0] * num_atoms
+        v0[6] = 1
+        vector0 = tf.constant(v0, tf.float32)
+        Q = QModelConstantD(vector0)
+        Vmin = -10.
+        Vmax = 10.
+        Qexp = expQDist(Q, Vmin, Vmax)
+        action = tf.constant([[1, 0, 0, 0],
+                              [1, 0, 0, 0]], tf.float32)
+        reward = tf.constant([0., 0.], tf.float32)
+        state = [tf.constant([0., 0.], tf.float32)]
+        # difference!
+        term = tf.constant([0, 1,], tf.float32)
+        Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
+                                                     Vmin, Vmax,
+                                                     action, reward,
+                                                     state, state,
+                                                     term, 4, gamma,
+                                                     vector0)
+        self.assertTrue(Qerr[1] < Qerr[0])
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * weights[1]) ==
+                                           tf.round(100. * vector0)))
+        self.assertFalse(tf.math.reduce_all(tf.round(100. * weights[0]) ==
+                                            tf.round(100. * vector0)))
+
 
 if __name__ == "__main__":
     T = TestHuber()
@@ -338,3 +384,4 @@ if __name__ == "__main__":
     T = TestDistroQdiscrete()
     T.test_q_err()
     T.test_shift()
+    T.test_termination()
