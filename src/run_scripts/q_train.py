@@ -2,7 +2,6 @@
     Deep Q Learning + Open AI Gym
 
 """
-from cmath import tau
 import gymnasium as gym
 import numpy as np
 import numpy.random as npr
@@ -12,7 +11,8 @@ from enum import Enum
 from frameworks.agent import Agent
 
 from run_scripts.runner import runner
-from run_scripts.utils import build_dense_qagent, build_dense_qagent_cont
+from run_scripts.utils import (build_dense_qagent, build_dense_qagent_cont,
+                               build_dense_qagent_distro)
 
 
 @dataclass
@@ -142,8 +142,9 @@ if __name__ == "__main__":
                                         train_epoch=def_params.train_epoch,
                                         batch_size=def_params.batch_size,
                                         )
-    else:
-        agent = build_dense_qagent(num_actions=env_config.num_actions,
+    else:  # discrete
+        # TESTING: distributional approach
+        agent = build_dense_qagent_distro(num_actions=env_config.num_actions,
                                    num_observations=env_config.num_obs,
                                    layer_sizes=[128, 64],
                                    drop_rate=0.05,
@@ -155,5 +156,6 @@ if __name__ == "__main__":
     reward_seq = run_and_train(env_config, agent, num_runs=200,
                                seed_runs=5,
                                step_per_train=def_params.step_per_train,
-                               step_per_copy=def_params.step_per_copy)
+                               step_per_copy=def_params.step_per_copy,
+                               debug_viz=True)
     print(reward_seq)

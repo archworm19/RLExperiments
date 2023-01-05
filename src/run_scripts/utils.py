@@ -1,11 +1,11 @@
 import numpy.random as npr
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Layer
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 from arch_layers.simple_networks import DenseNetwork
 from typing import List, Tuple
 
-from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont
+from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont, QAgent_distro
 
 
 class DenseScalar(ScalarModel):
@@ -47,6 +47,25 @@ class DenseScalarPi(ScalarStateModel):
         raw_act = self.d_out(yp)
         # apply bounds via sigmoid:
         return (self.ranges * tf.math.sigmoid(raw_act)) + self.offset
+
+
+class DenseDistro(DistroModel):
+    def __init__(self,
+                 embed_dim: int,
+                 layer_sizes: List[int],
+                 drop_rate: float,
+                 num_atoms: int = 51):
+        super(DenseDistro, self).__init__()
+        self.d_act = Dense(embed_dim)
+        self.d_state = Dense(embed_dim)
+        self.net = DenseNetwork(layer_sizes, num_atoms, drop_rate)
+
+    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
+        # NOTE: only uses 0th tensor in state_t
+        x_a = self.d_act(action_t)
+        x_s = self.d_state(state_t[0])
+        yp = self.net(tf.concat([x_a, x_s], axis=1))
+        return yp
 
 
 def build_dense_qagent(num_actions: int = 4,
@@ -107,6 +126,38 @@ def build_dense_qagent_cont(action_bounds: List[float] = [(-1, 1), (-1, 1)],
     return Qa
 
 
+def build_dense_qagent_distro(num_actions: int = 4,
+                              num_observations: int = 8,
+                              num_atoms: int = 51,
+                              embed_dim: int = 4,
+                              layer_sizes: List[int] = [32, 16],
+                              drop_rate: float = 0.1,
+                              gamma: float = 0.6,
+                              num_batch_sample: int = 1,
+                              tau: float = 0.15,
+                              train_epoch: int = 1,
+                              batch_size: int = 128):
+    # discrete control + distribution approach
+    rng = npr.default_rng(42)
+    def build_q():
+        return DenseDistro(embed_dim, layer_sizes, drop_rate, num_atoms)
+    run_iface = RunIface(num_actions, 1., rng)
+    n1 = int(num_atoms / 2)
+    vector0 = tf.constant([0] * n1 + [1] + [0] * (num_atoms - (n1 + 1)),
+                          tf.float32)
+    return QAgent_distro(run_iface,
+                         build_q,
+                         rng,
+                         num_actions, num_observations,
+                         vector0,
+                         gamma=gamma,
+                         tau=tau,
+                         num_batch_sample=num_batch_sample,
+                         train_epoch=train_epoch,
+                         batch_size=batch_size)
+
+
 if __name__ == "__main__":
     # quick assembly test
-    Q = build_dense_qagent_cont()
+    # Q = build_dense_qagent_cont()
+    Q = build_dense_qagent_distro()

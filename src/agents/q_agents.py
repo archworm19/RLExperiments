@@ -355,7 +355,7 @@ class QAgent_distro(Agent):
 
     def __init__(self,
                  run_iface: RunIface,
-                 model_builder: Callable[[], ScalarModel],
+                 model_builder: Callable[[], DistroModel],
                  rng: npr.Generator,
                  num_actions: int,
                  state_dims: int,
@@ -370,7 +370,7 @@ class QAgent_distro(Agent):
                  rand_act_decay: float = 0.95):
         # see QAgent docstring
         # TODO: additional fields: Vmin, Vmax, vector0
-        super(QAgent, self).__init__()
+        super(QAgent_distro, self).__init__()
         self.run_iface = run_iface
         self.mem_buffer = MemoryBuffer(["action", "reward",
                                         "state", "state_t1",
@@ -457,9 +457,15 @@ class QAgent_distro(Agent):
             run_data (RunData):
         """
         dset = self._draw_sample()
+
+        # TODO/TESTING:
+        for v in dset.batch(self.batch_size):
+            print(v)
+        input("cont?")
+
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=0)
+                                  verbose=1)
         return history
 
     def save_data(self,

@@ -268,9 +268,9 @@ def _redistribute_weight(Vmin: float, Vmax: float,
             = targets for (weighted) cross-entropy
             batch_size x num_atoms
     """
-    num_atoms = tf.cast(tf.shape(atoms_probs)[1], tf.float32)
-    dz = tf.math.divide(Vmax - Vmin, num_atoms - 1.)
-    z = tf.range(Vmin, Vmax + dz, dz)
+    num_atoms = tf.shape(atoms_probs)[1]
+    z = tf.linspace(Vmin, Vmax, num_atoms)
+    dz = z[1] - z[0]
 
     # T z_j <-- r_t1 + gamma * z_j
     # --> batch_size x num_atoms
@@ -319,10 +319,8 @@ def _calc_q_from_distro(Vmin: float, Vmax: float,
             shape = batch_size
 
     """
-    num_atoms = tf.cast(tf.shape(atoms_probs)[1], tf.float32)
-    dz = tf.math.divide(Vmax - Vmin, num_atoms - 1.)
-    # --> shape = num_atoms
-    z = tf.range(Vmin, Vmax + dz, dz)
+    num_atoms = tf.shape(atoms_probs)[1]
+    z = tf.linspace(Vmin, Vmax, num_atoms)
     return tf.math.reduce_sum(tf.expand_dims(z, 0) * atoms_probs,
                               axis=1)
 
