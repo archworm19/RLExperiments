@@ -261,7 +261,7 @@ class expQDist(ScalarModel):
 class TestDistroQdiscrete(TestCase):
     # distributional approach + discrete control
 
-    def test_q_err(self):
+    def test_q_err_uniform(self):
         # same model + rewards + (gamma=1) = 0 -->
         # weights proportional to probs?
         num_atoms = 11
@@ -365,6 +365,41 @@ class TestDistroQdiscrete(TestCase):
         self.assertFalse(tf.math.reduce_all(tf.round(100. * weights[0]) ==
                                             tf.round(100. * vector0)))
 
+    def test_q_error_random(self):
+        # test q error for random q expectations
+        num_atoms = 11
+        gamma = 1.
+        # 0 representation vector = which atom is active
+        #   when reward = 0?
+        v0 = [0] * num_atoms
+        v0[6] = 1
+        vector0 = tf.constant(v0, tf.float32)
+        Vmin = -10.
+        Vmax = 10.
+        action = tf.constant([[1, 0, 0, 0],
+                              [1, 0, 0, 0]], tf.float32)
+        reward = tf.constant([0., 0.], tf.float32)
+        state = [tf.constant([0., 0.], tf.float32)]
+        term = tf.constant([0, 0], tf.float32)
+        for _ in range(5):
+            target_vector = tf.random.uniform([num_atoms], 0., 25.)
+            # target_vector = tf.math.divide(target_vector, tf.math.reduce_sum(target_vector))
+            Q = QModelConstantD(target_vector)
+            Qexp = expQDist(Q, Vmin, Vmax)
+            Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
+                                                        Vmin, Vmax,
+                                                        action, reward,
+                                                        state, state,
+                                                        term, 4, gamma,
+                                                        vector0)
+            q_m = tf.nn.softmax(target_vector)
+            logqm = tf.reshape(tf.math.log(q_m), [1, -1])
+            Qerr_target = -1. * tf.math.reduce_sum(weights * logqm,
+                                                   axis=1)
+            self.assertTrue(tf.math.reduce_all(tf.round(100. * Qerr) ==
+                                            tf.round(100. * Qerr_target)))
+
+
 
 if __name__ == "__main__":
     T = TestHuber()
@@ -382,6 +417,7 @@ if __name__ == "__main__":
     T.test_trivial()
     T.test_extreme()
     T = TestDistroQdiscrete()
-    T.test_q_err()
+    T.test_q_err_uniform()
     T.test_shift()
     T.test_termination()
+    T.test_q_error_random()

@@ -425,8 +425,10 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     # model outputs v_i
     # softmax: p(v_i) = exp(v_i) / sum(exp(v_1) + ...)
     # log(p(v_i)) = v_i - log_sum_exp(V)
-    # - sum_i [weight_i * log p(v_i)]
-    #   = - sum_i [ weight_i * v_i ] + log_sum_exp(V)
+    # x-entropy: - sum_i [weight_i * log p(v_i)]
+    #       = - sum_i [w_i * v_i - w_i * log_sum_exp(V)]
+    #       = - sum_i [w_i * v_i] + log_sum_exp(V) sum_i [w_i]
+    #       = log_sum_exp(V) - sum_i [ w_i * v_i]
     atoms_v_q = q_model(action_t, state_t)
     return (tf.math.reduce_logsumexp(atoms_v_q, axis=1) -
             tf.math.reduce_sum(weights * atoms_v_q, axis=1)), weights
