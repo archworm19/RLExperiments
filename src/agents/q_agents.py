@@ -365,14 +365,15 @@ class QAgent_distro(Agent):
                  num_actions: int,
                  state_dims: int,
                  vector0: tf.Tensor,
-                 gamma: float = 0.7,
+                 gamma: float = 0.95,
                  tau: float = 0.01,
                  Vmin: float = -20.,
                  Vmax: float = 20.,
                  batch_size: int = 128,
-                 num_batch_sample: int = 8,
+                 num_batch_sample: int = 1,
                  train_epoch: int = 1,
-                 rand_act_decay: float = 0.95):
+                 rand_act_decay: float = 0.95,
+                 learning_rate: float = .001):
         # see QAgent docstring
         # TODO: additional fields: Vmin, Vmax, vector0
         super(QAgent_distro, self).__init__()
@@ -385,7 +386,7 @@ class QAgent_distro(Agent):
         self.memory_model = model_builder()
         # TODO: correct model?
         self.exp_model = ExpModel(Vmin, Vmax, self.memory_model,
-                                  r_std_dev=.0001)
+                                  r_std_dev=0.0)
         self.num_actions = num_actions
         self.gamma = gamma
         self.tau = tau
@@ -406,18 +407,20 @@ class QAgent_distro(Agent):
                   tf.keras.Input(shape=(),
                                  name="termination", dtype=tf.float32)]
         # loss ~ discrete Q error framework
-        Q_err, _ = calc_q_error_distro_discrete(self.free_model, self.exp_model, self.memory_model,
-                                                Vmin, Vmax,
-                                                inputs[0], inputs[1],
-                                                [inputs[2]], [inputs[3]],
-                                                inputs[4],
-                                                self.num_actions, self.gamma,
-                                                vector0)   
+        Q_err, weights, act_vect = calc_q_error_distro_discrete(self.free_model, self.exp_model, self.memory_model,
+                                                      Vmin, Vmax,
+                                                      inputs[0], inputs[1],
+                                                      [inputs[2]], [inputs[3]],
+                                                      inputs[4],
+                                                      self.num_actions, self.gamma,
+                                                      vector0)   
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err),
-                                           "full_loss": Q_err})  # TODO: TESTING
-        self.kmodel.compile(tf.keras.optimizers.Adam(.001))
+                                           "full_loss": Q_err,  # TODO: TESTING
+                                           "weights": weights,  # TODO: TESTING
+                                           "action_vector": act_vect})  # TODO: TESTING
+        self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
 
         self.run_iface.rand_act_prob = 1.
 
@@ -441,6 +444,12 @@ class QAgent_distro(Agent):
         Returns:
             int: index of selected action
         """
+        if debug:
+            print("p(atom_j | a, state_t) for all a")
+            action_t, state_t = build_action_probes(state, self.run_iface.num_actions)
+            prob = tf.nn.softmax(self.memory_model(action_t, state_t), axis=1).numpy()
+            print(np.round(prob, decimals=2))
+
         return self.run_iface.select_action(self.exp_model, state, debug=debug)
 
     def _copy_model(self, debug: bool = False):
@@ -484,7 +493,9 @@ class QAgent_distro(Agent):
         self.mem_buffer.append(d)
 
     def end_epoch(self):
-        self.run_iface.rand_act_prob *= self.rand_act_decay
+        # TODO: minimum rand act prob?
+        self.run_iface.rand_act_prob = max(0.1,
+                                           self.rand_act_decay * self.run_iface.rand_act_prob)
 
 
 # Continuous Agents

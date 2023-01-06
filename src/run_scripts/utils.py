@@ -55,21 +55,19 @@ class DenseDistro(DistroModel):
                  embed_dim: int,
                  layer_sizes: List[int],
                  drop_rate: float,
-                 num_atoms: int = 51,
-                 sigmoid_scale: float = 20.):
+                 num_atoms: int = 51):
         # NOTE: use sigmoid_scale to avoid overflows
         super(DenseDistro, self).__init__()
         self.d_act = Dense(embed_dim)
         self.d_state = Dense(embed_dim)
         self.net = DenseNetwork(layer_sizes, num_atoms, drop_rate)
-        self.sigmoid_scale = sigmoid_scale
 
     def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
         # NOTE: only uses 0th tensor in state_t
         x_a = self.d_act(action_t)
         x_s = self.d_state(state_t[0])
         yp = self.net(tf.concat([x_a, x_s], axis=1))
-        return (tf.math.sigmoid(yp) - 0.5) * self.sigmoid_scale
+        return yp
 
 
 def build_dense_qagent(num_actions: int = 4,
@@ -166,7 +164,9 @@ def build_dense_qagent_distro(num_actions: int = 4,
                          tau=tau,
                          num_batch_sample=num_batch_sample,
                          train_epoch=train_epoch,
-                         batch_size=batch_size)
+                         batch_size=batch_size,
+                         learning_rate=.0001,
+                         rand_act_decay=0.97)
 
 
 if __name__ == "__main__":

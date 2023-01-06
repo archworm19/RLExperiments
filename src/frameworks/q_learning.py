@@ -267,21 +267,28 @@ def _redistribute_weight(Vmin: float, Vmax: float,
         tf.Tensor: weights in atom-z space for each batch sample
             = targets for (weighted) cross-entropy
             batch_size x num_atoms
+            NOTE: will be approximately normalized across atoms
+                but substantial possibility of numeric errors
     """
+    # for illustrative purposes, we'll refer to
+    # n_in = num atoms in; n_out = num atoms out
+    # even tho n_in = n_out in this case
+
     num_atoms = tf.shape(atoms_probs)[1]
+    # --> shape = n_out
     z = tf.linspace(Vmin, Vmax, num_atoms)
     dz = z[1] - z[0]
 
     # T z_j <-- r_t1 + gamma * z_j
-    # --> batch_size x num_atoms
+    # --> batch_size x n_in
     Tz = tf.clip_by_value(tf.expand_dims(reward_t1, axis=1) + gamma * tf.expand_dims(z, axis=0),
                           Vmin, Vmax)
 
     # calculate distance from each atom in T z_j
     # from each atom in z
-    # --> batch_size x num_atoms x num_atoms
+    # --> batch_size x n_in x n_out
     diff = tf.expand_dims(Tz, 2) - tf.reshape(z, [1, 1, -1])
-    dist = tf.math.abs(diff)  # TODO: not sure I'll need this
+    dist = tf.math.abs(diff)
 
     # for atom in T z_j
     # contributing weight = (dz - dist) / dz
@@ -290,11 +297,14 @@ def _redistribute_weight(Vmin: float, Vmax: float,
     #   > (dz - dist) >= 0 for 2 closest (given earlier clipping)
     #   > (dz - dist) < 0 for all other atoms
     # so: just clip the contributing weights
+    # KEY: normalized across axis 2
     contrib = tf.math.divide(tf.clip_by_value(dz - dist, 0., dz), dz)
 
-    # scale contributions of each atom in T z_j
-    # by atom's probability
-    weights = tf.math.reduce_sum(contrib * tf.expand_dims(atoms_probs, 1),
+    # scale contributions by probabilities
+    # contrib = batch_size x n_in x n_out
+    # atoms_probs = batch_size x n_in
+    # --> weights = batch_size x n_out
+    weights = tf.math.reduce_sum(contrib * tf.expand_dims(atoms_probs, 2),
                                  axis=1)
     return weights
 
@@ -405,6 +415,9 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
         tf.Tensor: Q error
             shape = batch_size
         tf.Tensor: weights
+            batch_size x num_atoms
+        tf.Tensor: selected action tensor
+            batch_size x num_action
     """
     # greedy selection
     max_a, _ = _greedy_select(selection_model, num_action, state_t1)
@@ -415,6 +428,7 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     atoms_probs_target = tf.nn.softmax(tf.stop_gradient(eval_model(max_a_vector, state_t1)),
                                        axis=1)
     weights = _redistribute_weight(Vmin, Vmax, atoms_probs_target, reward_t1, gamma)
+    # TODO: consider renormalizing weights to avoid numerical instability
 
     # termination
     # if termination bit --> weights = vector0
@@ -431,4 +445,4 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     #       = log_sum_exp(V) - sum_i [ w_i * v_i]
     atoms_v_q = q_model(action_t, state_t)
     return (tf.math.reduce_logsumexp(atoms_v_q, axis=1) -
-            tf.math.reduce_sum(weights * atoms_v_q, axis=1)), weights
+            tf.math.reduce_sum(weights * atoms_v_q, axis=1)), weights, max_a_vector
