@@ -143,18 +143,14 @@ if __name__ == "__main__":
                                         batch_size=def_params.batch_size,
                                         )
     else:  # discrete
-        # TESTING: distributional approach
-        agent = build_dense_qagent_distro(num_actions=env_config.num_actions,
+        agent = build_dense_qagent(num_actions=env_config.num_actions,
                                    num_observations=env_config.num_obs,
-                                   Vmin=-25.,
-                                   Vmax=25.,
-                                   num_atoms=51,
                                    layer_sizes=[128, 64],
                                    drop_rate=0.05,
                                    gamma=def_params.gamma,
-                                   tau=def_params.tau,
-                                   num_batch_sample=def_params.num_batch_sample,
-                                   train_epoch=def_params.train_epoch,
+                                   tau=def_params.tau,  # faster update?
+                                   num_batch_sample=def_params.num_batch_sample,  # faster update?
+                                   train_epoch=1,
                                    batch_size=def_params.batch_size)
     reward_seq = run_and_train(env_config, agent, num_runs=200,
                                seed_runs=5,
@@ -162,3 +158,17 @@ if __name__ == "__main__":
                                step_per_copy=def_params.step_per_copy,
                                debug_viz=False)
     print(reward_seq)
+
+    # TESTING: distributional approach
+    # CURRENT HYPOTHESIS:
+    # > I think I've implemented the math correctly
+    # Issues
+    # 1. it takes forever for the error to converge
+    #   ... performance helped by large tau / more batches
+    #   = faster training
+    # 2. finds a soln that works pretty well but then
+    #   unlearns it in favor of a minimal movement soln
+    # Hypothesis: original Q soln relies heavily on
+    #   huge error of termination to do pseduo-importance sampling
+    # On another note: distributional approach might not make sense
+    #       for duration style tasks like cartpole
