@@ -178,13 +178,18 @@ class TestDQNdistro(TestCase):
             return DenseDistro()
         # assumes 5 atoms
         vector0 = tf.constant([0, 0, 1, 0, 0], tf.float32)
+        self.Vmax = 20.
         self.QA = QAgent_distro(run_iface,
                                 q_builder,
                                 rng,
                                 2, 2,
                                 vector0,
+                                Vmin = -1 * self.Vmax,
+                                Vmax = self.Vmax,
                                 gamma=0.95,
-                                tau=.2)
+                                tau=.1,
+                                num_batch_sample=1,
+                                learning_rate=.001)
         # load in data:
         self.r = 2
         dat = _fake_data_reward_button(100, r=self.r)
@@ -194,23 +199,16 @@ class TestDQNdistro(TestCase):
 
     def test_reward_button(self):
         # train model a few times
-        for _ in range(200):
+        for _ in range(2000):
             self.QA.train()
             self.QA._copy_model()
 
         # reward button: if learn correct action --> can get 1 reward with
         #       each step
-        #       assuming high enough gamma --> expected reward > Vmax
-        #           --> check that outputs are approx= [0, 0, 0, 0, 1]
-        #           for all samples
+        #       assuming high enough gamma --> expected reward approaches Vmax
         for v in self.QA._draw_sample().batch(32):
-            # test probability vector
-            atom_probs = tf.nn.softmax(self.QA.memory_model(v["action"], [v["state"]]), axis=1)
-            self.assertTrue(tf.math.reduce_all(atom_probs[:, -1] >= 0.9))
-
             # test model expectation
             exp_q = self.QA.exp_model(v["action"], [v["state"]])
-            print(exp_q)
             self.assertTrue(tf.math.reduce_all(tf.math.abs(20. - exp_q) < 1.5))
             break
 

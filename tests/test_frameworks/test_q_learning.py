@@ -216,6 +216,18 @@ class TestDistroQ(TestCase):
         Q_target = tf.constant([2., 2.])
         assert tf.math.reduce_all(tf.round(100. * Q) ==
                                 tf.round(100. * Q_target))
+    
+    def test_weights(self):
+        Vmin = -20.
+        Vmax = 20.
+        v = 1. / 51.
+        atoms_probs = tf.constant([[v] * 51,
+                                   [v] * 51], dtype=tf.float32)
+        reward = tf.constant([0.3, 0.6])
+        weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
+        weight_target = tf.ones([2], tf.float32)
+        assert tf.math.reduce_all(tf.round(100. * weights) ==
+                                tf.round(100. * weight_target))
 
 
 class QModelUniformD(DistroModel):
@@ -413,6 +425,7 @@ if __name__ == "__main__":
     T.test_negative_control()
     T.test_actor_grad()
     T = TestDistroQ()
+    T.test_weights()
     T.test_trivial()
     T.test_extreme()
     T = TestDistroQdiscrete()
