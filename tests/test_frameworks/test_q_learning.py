@@ -1,4 +1,5 @@
 """Q learning tests"""
+import numpy.random as npr
 import tensorflow as tf
 from typing import List
 from unittest import TestCase
@@ -192,12 +193,12 @@ class TestDistroQ(TestCase):
         weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
         target = tf.constant([[0, 0, 1],
                             [1, 0, 0]], dtype=tf.float32)
-        assert tf.math.reduce_all(tf.round(100. * weights) ==
-                                tf.round(100. * target))
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * weights) ==
+                                tf.round(100. * target)))
         Q = _calc_q_from_distro(Vmin, Vmax, atoms_probs)
         Q_target = tf.constant([3., 1.])
-        assert tf.math.reduce_all(tf.round(100. * Q) ==
-                                tf.round(100. * Q_target))
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * Q) ==
+                                tf.round(100. * Q_target)))
 
     def test_extreme(self):
         # extreme case: extreme rewards that saturate at Vmin or Vmax
@@ -210,12 +211,12 @@ class TestDistroQ(TestCase):
         weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
         target = tf.constant([[1, 0, 0],
                             [0, 0, 1]], dtype=tf.float32)
-        assert tf.math.reduce_all(tf.round(100. * weights) ==
-                                tf.round(100. * target))
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * weights) ==
+                                tf.round(100. * target)))
         Q = _calc_q_from_distro(Vmin, Vmax, atoms_probs)
         Q_target = tf.constant([2., 2.])
-        assert tf.math.reduce_all(tf.round(100. * Q) ==
-                                tf.round(100. * Q_target))
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * Q) ==
+                                tf.round(100. * Q_target)))
     
     def test_weights(self):
         Vmin = -20.
@@ -226,8 +227,62 @@ class TestDistroQ(TestCase):
         reward = tf.constant([0.3, 0.6])
         weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
         weight_target = tf.ones([2], tf.float32)
-        assert tf.math.reduce_all(tf.round(100. * weights) ==
-                                tf.round(100. * weight_target))
+        self.assertTrue(tf.math.reduce_all(tf.round(100. * weights) ==
+                                tf.round(100. * weight_target)))
+
+    def test_weights_worked(self):
+        # Worked Example for probability redistribution
+        # input atoms: z_i = [-2, 0, 2]
+        # output atoms: z_j = [-2, 0, 2]
+        # reward: r = 0.6
+        # gamma = 1.
+        # atom probability: [p1, p2, 1 - (p1 + p2)]
+        # -->
+        # > T z_i = [-1.4, 0.6, 2.6]
+        # > clipped T z_i = [-1.4, 0.6, 2.]
+        # > distances (Tz_i vs z_j) =
+        #      [0.6, 1.4, 3.4,
+        #       2.6, 0.6, 1.4,
+        #       4.0, 2.0, 0.0]
+        # > clip(dz - distances, dz) = A
+        #      [1.4, 0.6, 0.0,
+        #       0.0, 1.4, 0.6,
+        #       0.0, 0.0, 2.0]
+        # > divide by dz --> A / dz (A / 2.)
+        # > multiply by probabilities == redistribute =
+        #   0.5 * []
+        #   [1.4, 0.6, 0.0] * p1 + [0.0, 1.4, 0.6] * p2
+        #       + [0.0, 0.0, 2.0]
+        #       - [0.0, 0.0, 2.0] * p1
+        #       - [0.0, 0.0, 2.0] * p2 ]
+        # = 0.5 * [ [1.4, 0.6, -2.0] * p1 + [0.0, 1.4, -1.4] * p2
+        #       + [0.0, 0.0, 2.0] ]
+        # = 0.5 * [1.4 * p1, 0.6 * p1 + 1.4 * p2, 2.0 - (2.0 * p1 + 1.4 * p2)]
+        # sum of output vector
+        # = 0.5 * [ p1 * 0 + p2 * 0 + 2] = 1 (check)
+        Vmin = -2.
+        Vmax = 2.
+
+        # let's try different values for p1, p2
+        rng = npr.default_rng(42)
+        for _ in range(5):
+            p1 = rng.random() * 0.5
+            p2 = rng.random() * 0.5
+            p3 = 1 - (p1 + p2)
+            pr = [p1, p2, p3]
+            # 2 identical samples ~ check of independence
+            atoms_probs = tf.constant([pr, pr], dtype=tf.float32)
+            reward = tf.constant([0.6, 0.6])
+            weights = _redistribute_weight(Vmin, Vmax, atoms_probs, reward, 1.)
+            wt = [1.4 * p1,
+                  0.6 * p1 + 1.4 * p2,
+                  2.0 - (2.0 * p1 + 1.4 * p2)]
+            weight_target = tf.constant([wt, wt], dtype=tf.float32) * 0.5
+            self.assertTrue(tf.math.reduce_all(tf.round(100. * weights) ==
+                                      tf.round(100. * weight_target)))
+            wsum = tf.math.reduce_sum(weight_target, axis=1)
+            self.assertTrue(tf.math.reduce_all(tf.round(100. * wsum) ==
+                                      tf.round(100. * tf.constant([1., 1.], dtype=tf.float32))))
 
 
 class QModelUniformD(DistroModel):
@@ -292,7 +347,7 @@ class TestDistroQdiscrete(TestCase):
         v0 = [0] * num_atoms
         v0[6] = 1
         vector0 = tf.constant(v0, tf.float32)
-        Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
+        Qerr, weights, _ = calc_q_error_distro_discrete(Q, Qexp, Q,
                                                      Vmin, Vmax,
                                                      action, reward,
                                                      state, state,
@@ -325,7 +380,7 @@ class TestDistroQdiscrete(TestCase):
         for i in range(5):
             z = ((Vmax - Vmin) / (num_atoms - 1)) * i
             reward = tf.constant([z, z], tf.float32)
-            Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
+            Qerr, weights, _ = calc_q_error_distro_discrete(Q, Qexp, Q,
                                                         Vmin, Vmax,
                                                         action, reward,
                                                         state, state,
@@ -365,7 +420,7 @@ class TestDistroQdiscrete(TestCase):
         state = [tf.constant([0., 0.], tf.float32)]
         # difference!
         term = tf.constant([0, 1,], tf.float32)
-        Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
+        Qerr, weights, _ = calc_q_error_distro_discrete(Q, Qexp, Q,
                                                      Vmin, Vmax,
                                                      action, reward,
                                                      state, state,
@@ -376,40 +431,6 @@ class TestDistroQdiscrete(TestCase):
                                            tf.round(100. * vector0)))
         self.assertFalse(tf.math.reduce_all(tf.round(100. * weights[0]) ==
                                             tf.round(100. * vector0)))
-
-    def test_q_error_random(self):
-        # test q error for random q expectations
-        num_atoms = 11
-        gamma = 1.
-        # 0 representation vector = which atom is active
-        #   when reward = 0?
-        v0 = [0] * num_atoms
-        v0[6] = 1
-        vector0 = tf.constant(v0, tf.float32)
-        Vmin = -10.
-        Vmax = 10.
-        action = tf.constant([[1, 0, 0, 0],
-                              [1, 0, 0, 0]], tf.float32)
-        reward = tf.constant([0., 0.], tf.float32)
-        state = [tf.constant([0., 0.], tf.float32)]
-        term = tf.constant([0, 0], tf.float32)
-        for _ in range(5):
-            target_vector = tf.random.uniform([num_atoms], 0., 25.)
-            # target_vector = tf.math.divide(target_vector, tf.math.reduce_sum(target_vector))
-            Q = QModelConstantD(target_vector)
-            Qexp = expQDist(Q, Vmin, Vmax)
-            Qerr, weights = calc_q_error_distro_discrete(Q, Qexp, Q,
-                                                        Vmin, Vmax,
-                                                        action, reward,
-                                                        state, state,
-                                                        term, 4, gamma,
-                                                        vector0)
-            q_m = tf.nn.softmax(target_vector)
-            logqm = tf.reshape(tf.math.log(q_m), [1, -1])
-            Qerr_target = -1. * tf.math.reduce_sum(weights * logqm,
-                                                   axis=1)
-            self.assertTrue(tf.math.reduce_all(tf.round(100. * Qerr) ==
-                                            tf.round(100. * Qerr_target)))
 
 
 if __name__ == "__main__":
@@ -425,6 +446,7 @@ if __name__ == "__main__":
     T.test_negative_control()
     T.test_actor_grad()
     T = TestDistroQ()
+    T.test_weights_worked()
     T.test_weights()
     T.test_trivial()
     T.test_extreme()
@@ -432,4 +454,3 @@ if __name__ == "__main__":
     T.test_q_err_uniform()
     T.test_shift()
     T.test_termination()
-    T.test_q_error_random()

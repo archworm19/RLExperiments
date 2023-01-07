@@ -279,9 +279,11 @@ def _redistribute_weight(Vmin: float, Vmax: float,
     z = tf.linspace(Vmin, Vmax, num_atoms)
     dz = z[1] - z[0]
 
-    # T z_j <-- r_t1 + gamma * z_j
+    # T z_j = reward + gamma * z_j
+    # reward --> batch_size x 1
+    reward_exp = tf.expand_dims(reward_t1, axis=1)
     # --> batch_size x n_in
-    Tz = tf.clip_by_value(tf.expand_dims(reward_t1, axis=1) + gamma * tf.expand_dims(z, axis=0),
+    Tz = tf.clip_by_value(reward_exp + gamma * tf.expand_dims(z, axis=0),
                           Vmin, Vmax)
 
     # calculate distance from each atom in T z_j
@@ -292,6 +294,7 @@ def _redistribute_weight(Vmin: float, Vmax: float,
 
     # for atom in T z_j
     # contributing weight = (dz - dist) / dz
+    # --> batch_size x n_in x n_out
     # NOTE: only care about the 2 closest atoms
     #   to each atom in T z   
     #   > (dz - dist) >= 0 for 2 closest (given earlier clipping)
@@ -363,6 +366,45 @@ def _calc_q_from_distro(Vmin: float, Vmax: float,
 # softmax = exp(v1) / Z
 # log(softmax) = v1 - log(Z)
 # log(Z) = log(exp(v1) + exp(v2) + ...)
+#
+#
+# TODO: turn this into a test!
+# Worked Example for probability redistribution
+# input atoms: z_i = [-1, 1]
+# output atoms: z_j = [-1, 0, 1, 2]
+# reward: r = 0.6
+# atom probability: p
+# -->
+# > T z_i = [-.4, 1.6]
+# > distances = 
+#      [0.6, 0.4, 1.4, 2.4,
+#       2.6, 1.6, 0.6, 0.4]
+# > truncated distances =
+#      [0.6, 0.4, 0, 0,
+#       0, 0, 0.6, 0.4]
+# > multiply by probabilities == redistribute =
+#   [0.6, 0.4, 0, 0] * p1 + [0, 0, 0.6, 0.4] * (1 - p1)
+# sum of probabilities = (0.6 + 0.4) * p1 + (0.6 + 0.4) * (1 - p1)
+#                      = 1 (independent of p1 and the specific distro vectors!)
+# > output = [0.6 p1, 0.4 p1, 0.6 * (1 - p1), 0.4 * (1 - p1)]
+# 
+# Q? does predicting right probabilities make sense?
+# > output = [0.6 * p1 + 0.4 * p2, 0.6 * p3 + 0.4 * z]
+#       where z = 1 - (p1 + p2 + p3)
+# > sum[output] = 0.6 * p1 + 0.4 * p2 + 0.6 * p3 + 0.4 - 0.4 * p1 - 0.4 * p2 - 0.4 * p3
+#               = 0.2 * p1 + 0.6 * p3
+# there are many choices for p1, p3 where this will fail --> proof it doesn't make sense!
+#
+# Summary: left multiply is correct
+#
+#
+# TODO: I feel like weights aren't working for termination case!
+# TODO: make this a test!
+# What's the expectation?
+# > when termination bit is activated --> weight should be the 0 vector
+# ... hmmm: actually, it probably is working
+# TODO: I think it's getting added in the wrong place tho!
+# --> should replace z? right? test = what it does in case of non-zero reward
 
 
 def calc_q_error_distro_discrete(q_model: DistroModel,
@@ -405,11 +447,12 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
         state_t1 (List[tf.Tensor]): state at time t+1
         termination (tf.Tensor): termination bit
             1 if terminal
+            shape = batch_size
         num_action (int): number of available actions
         gamma (float): discount factor
         vector0 (tf.Tensor): 0 representation for atoms
             if termination --> return 0 vector for Tz
-            shape = batch_size
+            shape = num_atoms
 
     Returns:
         tf.Tensor: Q error
@@ -425,15 +468,15 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
 
     # apply Bellman operator --> target (weights of X-entropy)
     # --> batch_size x num_atoms
-    atoms_probs_target = tf.nn.softmax(tf.stop_gradient(eval_model(max_a_vector, state_t1)),
-                                       axis=1)
+    # NOTE: if termination bit specified --> probability vector = vector0
+    #       --> effective Tz = reward
+    #       else: use model
+    term_exp = tf.expand_dims(termination, axis=1)
+    v0_exp = tf.expand_dims(vector0, axis=0)
+    atoms_probs_target = (term_exp * v0_exp +
+                          (1.0 - term_exp) * tf.nn.softmax(tf.stop_gradient(eval_model(max_a_vector, state_t1)),
+                                                              axis=1))
     weights = _redistribute_weight(Vmin, Vmax, atoms_probs_target, reward_t1, gamma)
-    # TODO: consider renormalizing weights to avoid numerical instability
-
-    # termination
-    # if termination bit --> weights = vector0
-    term = tf.expand_dims(termination, 1)
-    weights = (1 - term) * weights + term * tf.expand_dims(vector0, 0)
 
     # x-entropy with weights as targets
     # model outputs v_i
