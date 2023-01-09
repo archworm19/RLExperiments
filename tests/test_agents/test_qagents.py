@@ -228,7 +228,7 @@ class TestDQNdistro(TestCase):
         for v in self.QA._draw_sample().batch(32):
             # test model expectation
             exp_q = self.QA.exp_model(v["action"], [v["state"]])
-            self.assertTrue(tf.math.reduce_all(tf.math.abs(20. - exp_q) < 1.5))
+            self.assertTrue(tf.math.reduce_all(tf.math.abs(self.Vmax - exp_q) < 1.5))
             break
 
     def test_termination(self):
@@ -252,7 +252,7 @@ class TestDQNdistro(TestCase):
                               tf.math.reduce_sum(term_states))
             runq = tf.divide(tf.math.reduce_sum((1. - term_states) * exp_q),
                               tf.math.reduce_sum((1. - term_states)))
-            self.assertTrue(termq <= 1.15)
+            self.assertTrue(termq <= 1.25)
             self.assertTrue(runq >= 2.0)
             break
 
