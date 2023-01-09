@@ -50,12 +50,11 @@ class DenseScalarPi(ScalarStateModel):
 
 
 class DenseDistro(DistroModel):
-    # number of atoms = 5
-    def __init__(self):
+    def __init__(self, num_atoms: int = 5):
         super(DenseDistro, self).__init__()
         self.d_act = Dense(4)
         self.d_state = Dense(4)
-        self.net = DenseNetwork([10], 5, 0.)
+        self.net = DenseNetwork([10], num_atoms, 0.)
 
     def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
         x_a = self.d_act(action_t)
@@ -106,6 +105,20 @@ def _fake_data_positive_response_cont(num_samples: int = 5000,
     return (states[:-1], states[1:], actions[:-1],
                   rewards[:-1], terms[:-1])
 
+
+def _fake_data_termination(num_samples: int = 5000,
+                             r = 1.):
+    # discrete case
+    # reward always 1
+    # if sum(state) < 0 --> termination
+    rng = npr.default_rng(42)
+    states = rng.random((num_samples, 2)) - 0.5
+    action0 = (rng.random((num_samples,)) > 0.5) * 1
+    actions = action0
+    rewards = np.ones((num_samples,))
+    terms = 1. * (np.sum(states, axis=1) < 0)
+    return (states[:-1], states[1:], actions[:-1],
+                  rewards[:-1], terms[:-1])
 
 class TestDQN(TestCase):
 
@@ -175,10 +188,10 @@ class TestDQNdistro(TestCase):
         rng = npr.default_rng(42)
         run_iface = RunIface(2, 0.25, rng)
         def q_builder():
-            return DenseDistro()
-        # assumes 5 atoms
-        vector0 = tf.constant([0, 0, 1, 0, 0], tf.float32)
-        self.Vmax = 20.
+            return DenseDistro(21)
+        # assumes 21 atoms
+        vector0 = tf.constant([0] * 10 + [1] + [0] * 10, tf.float32)
+        self.Vmax = 10.
         self.QA = QAgent_distro(run_iface,
                                 q_builder,
                                 rng,
@@ -189,15 +202,21 @@ class TestDQNdistro(TestCase):
                                 gamma=0.95,
                                 tau=.1,
                                 num_batch_sample=1,
-                                learning_rate=.001)
+                                learning_rate=.002)
         # load in data:
         self.r = 2
-        dat = _fake_data_reward_button(100, r=self.r)
+        self.buffer_size = 5000
+
+    def _load_data(self, dat):
         for i in range(len(dat[0])):
             self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
-                              dat[3][i], dat[4][i])
+                                dat[3][i], dat[4][i])
 
     def test_reward_button(self):
+        # load in reward button data
+        self._load_data(_fake_data_reward_button(num_samples=self.buffer_size,
+                                                 r=self.r))
+
         # train model a few times
         for _ in range(2000):
             self.QA.train()
@@ -210,6 +229,31 @@ class TestDQNdistro(TestCase):
             # test model expectation
             exp_q = self.QA.exp_model(v["action"], [v["state"]])
             self.assertTrue(tf.math.reduce_all(tf.math.abs(20. - exp_q) < 1.5))
+            break
+
+    def test_termination(self):
+        # termination dataset
+        # should learn: expected reward approximately 1
+        #   when sum of state < 0
+        self._load_data(_fake_data_termination(num_samples=self.buffer_size,
+                                               r=self.r))
+
+        # train model a few times
+        for _ in range(1000):
+            hist = self.QA.train()
+            self.QA._copy_model()
+
+        for v in self.QA._draw_sample().batch(32):
+            # test model expectation
+            sum_state = tf.math.reduce_sum(v["state"], axis=1)
+            exp_q = self.QA.exp_model(v["action"], [v["state"]])
+            term_states = tf.cast(sum_state < 0, tf.float32)
+            termq = tf.divide(tf.math.reduce_sum(term_states * exp_q),
+                              tf.math.reduce_sum(term_states))
+            runq = tf.divide(tf.math.reduce_sum((1. - term_states) * exp_q),
+                              tf.math.reduce_sum((1. - term_states)))
+            self.assertTrue(termq <= 1.15)
+            self.assertTrue(runq >= 2.0)
             break
 
 
@@ -320,3 +364,4 @@ if __name__ == "__main__":
     T = TestDQNdistro()
     T.setUp()
     T.test_reward_button()
+    T.test_termination()
