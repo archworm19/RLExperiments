@@ -403,7 +403,7 @@ class TestDistroQdiscrete(TestCase):
         # termination bit different
         # Q model outputs the vector0 --> error should be minimized
         #       when termination bit supplied
-        num_atoms = 11
+        num_atoms = 51
         gamma = 1.
         # 0 representation vector = which atom is active
         #   when reward = 0?
@@ -432,6 +432,39 @@ class TestDistroQdiscrete(TestCase):
         self.assertFalse(tf.math.reduce_all(tf.round(100. * weights[0]) ==
                                             tf.round(100. * vector0)))
 
+    def test_termination_random(self):
+        # > choose reward that does not saturate Vmin / Vmax
+        # > choose correct vector0 ~ z = 0 when active
+        # > if termination supplied --> exp[weight_i * z_i] should be approx= reward
+        #   regardless of other arguments
+        num_atoms = 51
+        gamma = 1.
+        # 0 representation vector = which atom is active
+        #   when reward = 0?
+        v0 = [0] * num_atoms
+        v0[25] = 1
+        vector0 = tf.constant(v0, tf.float32)
+        Q = QModelConstantD(vector0)
+        Vmin = -10.
+        Vmax = 10.
+        Qexp = expQDist(Q, Vmin, Vmax)
+        for i in range(5):
+            action = tf.random.uniform([2, 4], -1.0, 1.0)
+            reward = tf.random.uniform([2], -1.0, 1.0, seed=i)
+            state = [tf.random.uniform([2], -1.0, 1.0)]
+            # both samples terminating
+            term = tf.constant([1, 1,], tf.float32)
+            _Qerr, weights, _ = calc_q_error_distro_discrete(Q, Qexp, Q,
+                                                        Vmin, Vmax,
+                                                        action, reward,
+                                                        state, state,
+                                                        term, 4, gamma,
+                                                        vector0)
+            z = tf.linspace(Vmin, Vmax, 51)
+            wz = tf.math.reduce_sum(weights * tf.expand_dims(z, 0), axis=1)
+            self.assertTrue(tf.math.reduce_all(tf.round(100. * wz) ==
+                                               tf.round(100. * reward)))
+
 
 if __name__ == "__main__":
     T = TestHuber()
@@ -451,6 +484,7 @@ if __name__ == "__main__":
     T.test_trivial()
     T.test_extreme()
     T = TestDistroQdiscrete()
+    T.test_termination_random()
     T.test_q_err_uniform()
     T.test_shift()
     T.test_termination()

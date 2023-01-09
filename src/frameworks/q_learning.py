@@ -359,52 +359,6 @@ def _calc_q_from_distro(Vmin: float, Vmax: float,
 #       calcs Q ~ expectation = sum(z * p(z))
 #       redistributes weights --> targets
 #       returns critic categorical loss
-#
-# ... can have extra wrappers that take in the models
-# 
-# TODO: log and softmax?
-# softmax = exp(v1) / Z
-# log(softmax) = v1 - log(Z)
-# log(Z) = log(exp(v1) + exp(v2) + ...)
-#
-#
-# TODO: turn this into a test!
-# Worked Example for probability redistribution
-# input atoms: z_i = [-1, 1]
-# output atoms: z_j = [-1, 0, 1, 2]
-# reward: r = 0.6
-# atom probability: p
-# -->
-# > T z_i = [-.4, 1.6]
-# > distances = 
-#      [0.6, 0.4, 1.4, 2.4,
-#       2.6, 1.6, 0.6, 0.4]
-# > truncated distances =
-#      [0.6, 0.4, 0, 0,
-#       0, 0, 0.6, 0.4]
-# > multiply by probabilities == redistribute =
-#   [0.6, 0.4, 0, 0] * p1 + [0, 0, 0.6, 0.4] * (1 - p1)
-# sum of probabilities = (0.6 + 0.4) * p1 + (0.6 + 0.4) * (1 - p1)
-#                      = 1 (independent of p1 and the specific distro vectors!)
-# > output = [0.6 p1, 0.4 p1, 0.6 * (1 - p1), 0.4 * (1 - p1)]
-# 
-# Q? does predicting right probabilities make sense?
-# > output = [0.6 * p1 + 0.4 * p2, 0.6 * p3 + 0.4 * z]
-#       where z = 1 - (p1 + p2 + p3)
-# > sum[output] = 0.6 * p1 + 0.4 * p2 + 0.6 * p3 + 0.4 - 0.4 * p1 - 0.4 * p2 - 0.4 * p3
-#               = 0.2 * p1 + 0.6 * p3
-# there are many choices for p1, p3 where this will fail --> proof it doesn't make sense!
-#
-# Summary: left multiply is correct
-#
-#
-# TODO: I feel like weights aren't working for termination case!
-# TODO: make this a test!
-# What's the expectation?
-# > when termination bit is activated --> weight should be the 0 vector
-# ... hmmm: actually, it probably is working
-# TODO: I think it's getting added in the wrong place tho!
-# --> should replace z? right? test = what it does in case of non-zero reward
 
 
 def calc_q_error_distro_discrete(q_model: DistroModel,
@@ -452,7 +406,7 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
         gamma (float): discount factor
         vector0 (tf.Tensor): 0 representation for atoms
             if termination --> return 0 vector for Tz
-            shape = num_atoms
+            shape = num_atoms x num_actions
 
     Returns:
         tf.Tensor: Q error
