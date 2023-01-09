@@ -373,7 +373,8 @@ class QAgent_distro(Agent):
                  num_batch_sample: int = 1,
                  train_epoch: int = 1,
                  rand_act_decay: float = 0.95,
-                 learning_rate: float = .001):
+                 learning_rate: float = .001,
+                 mem_buffer_size: int = 500000):
         # see QAgent docstring
         # TODO: additional fields: Vmin, Vmax, vector0
         super(QAgent_distro, self).__init__()
@@ -381,7 +382,7 @@ class QAgent_distro(Agent):
         self.mem_buffer = MemoryBuffer(["action", "reward",
                                         "state", "state_t1",
                                         "termination"], rng,
-                                        500000)
+                                        mem_buffer_size)
         self.free_model = model_builder()
         self.memory_model = model_builder()
         # TODO: correct model?

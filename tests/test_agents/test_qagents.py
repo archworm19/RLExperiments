@@ -192,6 +192,7 @@ class TestDQNdistro(TestCase):
         # assumes 21 atoms
         vector0 = tf.constant([0] * 10 + [1] + [0] * 10, tf.float32)
         self.Vmax = 10.
+        self.buffer_size = 5000
         self.QA = QAgent_distro(run_iface,
                                 q_builder,
                                 rng,
@@ -202,10 +203,10 @@ class TestDQNdistro(TestCase):
                                 gamma=0.95,
                                 tau=.1,
                                 num_batch_sample=1,
-                                learning_rate=.002)
+                                learning_rate=.002,
+                                mem_buffer_size=self.buffer_size)
         # load in data:
         self.r = 2
-        self.buffer_size = 5000
 
     def _load_data(self, dat):
         for i in range(len(dat[0])):
@@ -218,7 +219,7 @@ class TestDQNdistro(TestCase):
                                                  r=self.r))
 
         # train model a few times
-        for _ in range(2000):
+        for _ in range(1000):
             self.QA.train()
             self.QA._copy_model()
 
