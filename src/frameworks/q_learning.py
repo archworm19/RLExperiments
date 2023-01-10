@@ -276,7 +276,7 @@ def _redistribute_weight(Vmin: float, Vmax: float,
 
     num_atoms = tf.shape(atoms_probs)[1]
     # --> shape = n_out
-    z = tf.linspace(Vmin, Vmax, num_atoms)
+    z = tf.cast(tf.linspace(Vmin, Vmax, num_atoms), atoms_probs.dtype)
     dz = z[1] - z[0]
 
     # T z_j = reward + gamma * z_j
@@ -333,7 +333,7 @@ def _calc_q_from_distro(Vmin: float, Vmax: float,
 
     """
     num_atoms = tf.shape(atoms_probs)[1]
-    z = tf.linspace(Vmin, Vmax, num_atoms)
+    z = tf.cast(tf.linspace(Vmin, Vmax, num_atoms), atoms_probs.dtype)
     return tf.math.reduce_sum(tf.expand_dims(z, 0) * atoms_probs,
                               axis=1)
 

@@ -25,6 +25,7 @@ class EnvConfig:
     continuous: bool
 
 
+# TODO: this is no longer used
 @dataclass
 class DefaultParams:
     gamma: float  # discount factor
@@ -38,30 +39,53 @@ class DefaultParams:
 
 
 class Envs(Enum):
-    cartpole = (EnvConfig("CartPole-v1", {}, 2, 4, 1000, False),
-                DefaultParams(0.99, .05,
-                              1, 64,
-                              1,
-                              1, 1))
-    lunar = (EnvConfig("LunarLander-v2", {}, 4, 8, 1000, False),
-             DefaultParams(0.99, .05,
-                           1, 64,
-                           1,
-                           1, 1))
-    acrobot = (EnvConfig("Acrobot-v1", {}, 3, 6, 200, False),
-               DefaultParams(0.99, .05,
-                              1, 64,
-                              1,
-                              1, 1))
-    pendulum = (EnvConfig('Pendulum-v1', {}, 1, 3, 500, True),
-                DefaultParams(0.99, .01,
-                              1, 1, 1, 1, 1,
-                              [(-2., 2.)]))
-    lunar_continuous = (EnvConfig("LunarLander-v2", {"continuous": True},
-                                  4, 8, 1000, True),
-                        DefaultParams(0.99, .01,
-                                      1, 1, 1, 1, 1,
-                                      [(-1., 1.), (-1., 1.)]))
+    cartpole = EnvConfig("CartPole-v1", {}, 2, 4, 1000, False)
+    lunar = EnvConfig("LunarLander-v2", {}, 4, 8, 1000, False)
+    acrobot = EnvConfig("Acrobot-v1", {}, 3, 6, 200, False)
+    pendulum = EnvConfig('Pendulum-v1', {}, 1, 3, 500, True)
+    lunar_continuous = EnvConfig("LunarLander-v2", {"continuous": True},
+                                  4, 8, 1000, True)
+
+
+# TODO: what's the right design pattern for this?
+# Idea: have this point to builder functions with variables supplied
+# TODO: move agent name to enum
+def build_agent(agent_name: str, action_dims: int, state_dims: int,
+                reward_scale: int,
+                action_bounds = None):
+    if agent_name == "dqn":
+        return build_dense_qagent(num_actions=action_dims,
+                                        num_observations=state_dims,
+                                        layer_sizes=[128, 64],
+                                        drop_rate=0.05,
+                                        gamma=0.99,
+                                        tau=.05,
+                                        num_batch_sample=1,
+                                        train_epoch=1,
+                                        batch_size=64)
+    elif agent_name == "dqn_cont":
+        return build_dense_qagent_cont(action_bounds=action_bounds,
+                                        num_observations=state_dims,
+                                        layer_sizes=[128, 64],
+                                        drop_rate=0.05,
+                                        gamma=0.99,
+                                        tau=.05,
+                                        num_batch_sample=1,
+                                        train_epoch=1,
+                                        batch_size=64)
+    elif agent_name == "dqn_distro":
+        return build_dense_qagent_distro(num_actions=action_dims,
+                                         num_observations=state_dims,
+                                         num_atoms=51,
+                                         Vmin=-1 * reward_scale,
+                                         Vmax=reward_scale,
+                                         layer_sizes=[128, 64],
+                                         drop_rate=0.05,
+                                         gamma=0.99,
+                                         tau=.05,
+                                         num_batch_sample=1,
+                                         train_epoch=1,
+                                         batch_size=64)
 
 
 def run_and_train(env_config: EnvConfig,
@@ -124,51 +148,18 @@ def run_and_train(env_config: EnvConfig,
 
 
 if __name__ == "__main__":
-    (env_config, def_params) = Envs.cartpole.value
-    # (env_config, def_params) = Envs.lunar.value
+    env_config = Envs.cartpole.value
+    reward_scale = 1000
+    # env_config = Envs.lunar.value
     # (env_config, def_params) = Envs.acrobot.value
     # (env_config, def_params) = Envs.pendulum.value
     # (env_config, def_params) = Envs.lunar_continuous.value
 
-    # run
-    if env_config.continuous:
-        agent = build_dense_qagent_cont(action_bounds=def_params.action_bounds,
-                                        num_observations=env_config.num_obs,
-                                        layer_sizes=[128, 64],
-                                        drop_rate=0.05,
-                                        gamma=def_params.gamma,
-                                        tau=def_params.tau,
-                                        num_batch_sample=def_params.num_batch_sample,
-                                        train_epoch=def_params.train_epoch,
-                                        batch_size=def_params.batch_size,
-                                        )
-    else:  # discrete
-        agent = build_dense_qagent(num_actions=env_config.num_actions,
-                                   num_observations=env_config.num_obs,
-                                   layer_sizes=[128, 64],
-                                   drop_rate=0.05,
-                                   gamma=def_params.gamma,
-                                   tau=def_params.tau,  # faster update?
-                                   num_batch_sample=def_params.num_batch_sample,  # faster update?
-                                   train_epoch=1,
-                                   batch_size=def_params.batch_size)
+    agent = build_agent("dqn_distro", env_config.num_actions, env_config.num_obs,
+                        reward_scale=reward_scale)
     reward_seq = run_and_train(env_config, agent, num_runs=200,
                                seed_runs=5,
-                               step_per_train=def_params.step_per_train,
-                               step_per_copy=def_params.step_per_copy,
+                               step_per_train=1,
+                               step_per_copy=1,
                                debug_viz=False)
     print(reward_seq)
-
-    # TESTING: distributional approach
-    # CURRENT HYPOTHESIS:
-    # > I think I've implemented the math correctly
-    # Issues
-    # 1. it takes forever for the error to converge
-    #   ... performance helped by large tau / more batches
-    #   = faster training
-    # 2. finds a soln that works pretty well but then
-    #   unlearns it in favor of a minimal movement soln
-    # Hypothesis: original Q soln relies heavily on
-    #   huge error of termination to do pseduo-importance sampling
-    # On another note: distributional approach might not make sense
-    #       for duration style tasks like cartpole

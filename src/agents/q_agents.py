@@ -494,9 +494,7 @@ class QAgent_distro(Agent):
         self.mem_buffer.append(d)
 
     def end_epoch(self):
-        # TODO: minimum rand act prob?
-        self.run_iface.rand_act_prob = max(0.1,
-                                           self.rand_act_decay * self.run_iface.rand_act_prob)
+        self.run_iface.rand_act_prob *= self.rand_act_decay
 
 
 # Continuous Agents

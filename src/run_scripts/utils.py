@@ -165,8 +165,8 @@ def build_dense_qagent_distro(num_actions: int = 4,
                          num_batch_sample=num_batch_sample,
                          train_epoch=train_epoch,
                          batch_size=batch_size,
-                         learning_rate=.0001,
-                         rand_act_decay=0.97)
+                         learning_rate=.002,
+                         rand_act_decay=0.95)
 
 
 if __name__ == "__main__":
