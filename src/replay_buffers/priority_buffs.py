@@ -89,7 +89,9 @@ class MemoryBufferPQ:
         self._hpq = []
 
     def _purge(self):
-        self._hpq = self._hpq[:self.buffer_size]
+        num_del = max(0, len(self._hpq) - self.buffer_size)
+        for _ in range(num_del):
+            self._hpq.pop()
 
     def append(self, sample_prob: float, new_dat: List):
         # sample_prob = sampling probability
@@ -107,7 +109,7 @@ class MemoryBufferPQ:
         # expensive O(N) operations
         raw_probs = [-1. * v.priority for v in self._hpq]
         cprobs = np.cumsum(raw_probs) / np.sum(raw_probs)
-        cprobs = np.vstack([0., cprobs])
+        cprobs = np.hstack([0., cprobs])
 
         # find boundaries:
         pbounds = np.linspace(0., 1., self.batch_size+1)[:self.batch_size]
@@ -117,25 +119,6 @@ class MemoryBufferPQ:
         self._segment_bounds = segment_starts + [len(self._hpq)]
 
     def pull_samples(self):
-        # TODO:ahhh... this is more complex than I was thinking
-        #   how do we pop these low probability dudes?
-        # idea 1: use
-
-        # TODO: ideas?
-        # properties of original paper?
-        # > batch_size segments with same sum(probability)
-        # > randomly samples within each segment
-        # uhh... why are you using a priority queue for this?
-        # just need the thing to be approximately sorted?
-        # welll... not quite --> heap automatically shifts data
-        #       into correct segment (and sets which elems to remove from last segment first)
-
-
-        # TODO: I supposed we could implement our own
-        #   pop method ~ handles the sift up procedure starting
-        #   from some index ~ log(N) swap operations ~ this is the best we'll do
-        # TEST: make sure it yield same result as bult in heappop for item 0
-
         # pulls batch_size samples
         # NOTE: this function pops samples from priority queue
         #   --> you have to reinsert them if you want them to stay
@@ -147,31 +130,4 @@ class MemoryBufferPQ:
                                     self._segment_bounds[i + 1])
             ret.append()
 
-
-if __name__ == "__main__":
-    # TODO: move to tests
-    items = [PItem(1., ["a", "b"]),
-             PItem(2., ["c", "d"]),
-             PItem(-100., ["z"]),
-             PItem(-50, ["opa"])]
-
-    # TESTING heap functionality
-    # insert into heap:
-    heap = []
-    for v in items:
-        heapq.heappush(heap, v)
-    print(heap)
-    # heapsort check
-    priorz = []
-    for _ in range(4):
-        priorz.append(heapq.heappop(heap).priority)
-    print(priorz)
-    print(heap)
-    # insert again --> test popping internal node
-    for v in items:
-        heapq.heappush(heap, v)
-    print(heap_pop_target(heap, 0))
-    print(heap)
-    print(heap_pop_target(heap, 1))
-    print(heap)
-    
+        # TODO: finish
