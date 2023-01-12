@@ -41,7 +41,8 @@ class TestPQ(TestCase):
         self.buffer_size = 1024  # some tests rely on law of large numbers
         self.batch_size = 4
         self.rng = npr.default_rng(42)
-        self.PQ = MemoryBufferPQ(self.rng, self.buffer_size, self.batch_size)
+        self.PQ = MemoryBufferPQ(self.rng, self.buffer_size, self.batch_size,
+                                 50)
         return super().setUp()
 
     def _load_data(self):
@@ -70,6 +71,7 @@ class TestPQ(TestCase):
             ind0 = self.PQ._segment_bounds[i]
             ind1 = self.PQ._segment_bounds[i + 1]
             psums.append(np.sum(hprobs[ind0:ind1]))
+
         for ps in psums:
             self.assertAlmostEqual(ps, 1. / self.batch_size, 2)
 
@@ -79,6 +81,48 @@ class TestPQ(TestCase):
         for i in range(1, len(seg_sizes)):
             self.assertTrue(seg_sizes[i] >= seg_sizes[i - 1])
 
+    def test_sampling(self):
+        self._load_data()
+        for i in range(3):
+            dat, seg_lengths = self.PQ.pull_samples()
+            self.assertTrue(len(dat) == self.batch_size)
+            self.assertTrue(len(seg_lengths) == self.batch_size)
+            tot_length = sum(seg_lengths)
+            # test the popping
+            self.assertTrue(tot_length == self.buffer_size - (i + 1) * self.batch_size)
+            self.assertTrue(len(self.PQ._hpq) == tot_length)
+
+
+class TestPQsmallbuff(TestCase):
+    # PQ has some odd behavior when buffer is not full
+
+    def setUp(self) -> None:
+        self.buffer_size = 1024  # some tests rely on law of large numbers
+        self.rng = npr.default_rng(42)
+
+    def _load_data(self, PQ: MemoryBufferPQ, num_load: int):
+        # fill up the buffer with test data
+        # priorities taken from uniform distribution
+        probs = []
+        for _ in range(num_load):
+            probs.append(self.rng.random())
+            PQ.append(probs[-1], [])
+        return probs
+
+    def test_sync(self):
+        update_interval = 50
+        batch_size = 32
+        PQ = MemoryBufferPQ(self.rng, self.buffer_size, batch_size,
+                            update_interval)
+        # load in 32 datapoints (< update interval)
+        #   --> sampling is not yet possible
+        self._load_data(PQ, 32)
+        d, _ = PQ.pull_samples()
+        self.assertIsNone(d)
+        # after another 100 --> we should be good to go
+        self._load_data(PQ, 100)
+        d, _ = PQ.pull_samples()
+        self.assertIsNotNone(d)
 
 
 if __name__ == "__main__":
@@ -89,3 +133,7 @@ if __name__ == "__main__":
     T.setUp()
     T.test_append()
     T.test_segment_bounds()
+    T.test_sampling()
+    T = TestPQsmallbuff()
+    T.setUp()
+    T.test_sync()
