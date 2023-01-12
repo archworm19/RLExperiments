@@ -148,9 +148,10 @@ def run_and_train(env_config: EnvConfig,
 
 
 if __name__ == "__main__":
-    env_config = Envs.cartpole.value
-    reward_scale = 1000
-    # env_config = Envs.lunar.value
+    # env_config = Envs.cartpole.value
+    # reward_scale = env_config.run_length
+    env_config = Envs.lunar.value
+    reward_scale = 200  # def of successful trial
     # (env_config, def_params) = Envs.acrobot.value
     # (env_config, def_params) = Envs.pendulum.value
     # (env_config, def_params) = Envs.lunar_continuous.value
