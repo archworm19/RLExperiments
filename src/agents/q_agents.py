@@ -17,6 +17,7 @@ from frameworks.custom_model import CustomModel
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 from agents.utils import build_action_probes
 from replay_buffers.replay_buffs import MemoryBuffer
+from replay_buffers.priority_buffs import MemoryBufferPQ
 
 
 # utils
@@ -211,10 +212,7 @@ class QAgent(Agent):
         """
         super(QAgent, self).__init__()
         self.run_iface = run_iface
-        self.mem_buffer = MemoryBuffer(["action", "reward",
-                                        "state", "state_t1",
-                                        "termination"], rng,
-                                        500000)
+        self.mem_buffer = MemoryBufferPQ(rng, 500000, self.batch_size)
         self.free_model = model_builder()
         self.memory_model = model_builder()
         self.num_actions = num_actions
@@ -225,6 +223,7 @@ class QAgent(Agent):
         self.train_epoch = train_epoch
         self.rng = rng
         self.rand_act_decay = rand_act_decay
+        self.beta = 0.
 
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
@@ -235,8 +234,13 @@ class QAgent(Agent):
                   tf.keras.Input(shape=(state_dims,),
                                  name="state_t1", dtype=tf.float32),
                   tf.keras.Input(shape=(),
-                                 name="termination", dtype=tf.float32)]
+                                 name="termination", dtype=tf.float32),
+                  tf.keras.Input(shape=(),
+                                 name="sample_probs", dtype=tf.float32),
+                  tf.keras.Input(shape=(),
+                                 name="beta", dtype=tf.float32)]
         # loss ~ discrete Q error framework
+        # --> shape = batch_size
         Q_err, _ = calc_q_error_sm(self.free_model,
                                    self.free_model,
                                    self.memory_model,
@@ -244,10 +248,17 @@ class QAgent(Agent):
                                    [inputs[2]], [inputs[3]],
                                    inputs[4],
                                    self.num_actions, self.gamma,
-                                   huber=False)       
+                                   huber=False)
+        # important sampling from Schaul et al, 2015
+        # > w_i = (1/N)^beta * (1/P(i))^beta
+        # where beta is annealed from 0 to 1
+        # P(i) = sample_probs in dsets
+        # --> shape = batch_size
+        weights = tf.math.pow(tf.math.divide(1., inputs[-2] * tf.cast(tf.shape(inputs[-2])[0], tf.float32)),
+                              inputs[-1])
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_mean(Q_err)})
+                                  outputs={"loss": tf.math.reduce_sum(weights * Q_err)})
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
 
         self.run_iface.rand_act_prob = 1.
@@ -282,10 +293,23 @@ class QAgent(Agent):
         copy_model(self.free_model, self.memory_model, self.tau)
 
     def _draw_sample(self):
-        d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
-        d = {k: np.array(d[k]) for k in d}
+        dat, seg_lengths = self.mem_buffer.pull_samples(self.num_batch_sample * self.batch_size)
+        if dat is None:
+            return None
+        nz = ["state", "state_t1", "action", "reward", "termination"]
+        d = {}
+        for i, name in enumerate(nz):
+            d[name] = np.array([dj[1][i] for dj in dat])
         # TODO: kinda meh design
         d["action"] = _one_hot(d["action"].astype(np.int32), self.num_actions)
+
+        # calc P(i) = probability of sampling given element
+        seg_lengths = np.array(seg_lengths)
+        # how to get sampling probability from segment length?
+        #   = (prob of choosing segment) * (1 / segment size)
+        pseg = seg_lengths / np.sum(seg_lengths)  # should all be about the same
+        sample_probs = pseg * (1. / seg_lengths)
+        d["sample_probs"] = sample_probs
         return tf.data.Dataset.from_tensor_slices(d)
 
     def train(self, debug: bool = False):
@@ -295,6 +319,8 @@ class QAgent(Agent):
             run_data (RunData):
         """
         dset = self._draw_sample()
+        if dset is None:
+            return None
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
                                   verbose=0)
@@ -307,15 +333,18 @@ class QAgent(Agent):
                   reward: float,
                   termination: bool):
         # NOTE: only saves a single step
-        d = {"state": state[0],
-             "state_t1": state_t1[0],
-             "action": action,
-             "reward": reward,
-             "termination": termination}
-        self.mem_buffer.append(d)
+        vout = self.kmodel({"state": [np.array(state[0])[None]],
+                            "state_t1": [np.array(state_t1[0])[None]],
+                            "action": np.array(action)[None],
+                            "reward": np.array(reward)[None],
+                            "termination": 1. * np.array(termination)[None]})
+        self.mem_buffer.append(vout["loss"],
+                               [state, state_t1, action, reward, termination])
 
     def end_epoch(self):
         self.run_iface.rand_act_prob *= self.rand_act_decay
+        # TODO: this should be hyperparam
+        self.beta = min(1., self.beta + .01)
 
 
 class ExpModel(ScalarModel):
