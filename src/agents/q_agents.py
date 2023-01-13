@@ -172,7 +172,8 @@ class QAgent(Agent):
                  tau: float = 0.01,
                  batch_size: int = 128,
                  train_epoch: int = 1,
-                 rand_act_decay: float = 0.95):
+                 rand_act_decay: float = 0.95,
+                 alpha: float = 1e-4):
         """
         Core Bellman Eqn:
             Q_f = free model
@@ -206,6 +207,7 @@ class QAgent(Agent):
             train_epoch (int):
             rand_act_decay (float): how much the probability of a random
                 action decays at end of each epoch
+            alpha (float): prioritization score = np.exp(alpha * TD_error)
         """
         # TODO: we're missing probability scaling system
         #   = alpha in Schaul et al, 2015
@@ -222,6 +224,7 @@ class QAgent(Agent):
         self.rng = rng
         self.rand_act_decay = rand_act_decay
         self.beta = 0.
+        self.alpha = alpha
 
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
@@ -247,16 +250,19 @@ class QAgent(Agent):
                                    inputs[4],
                                    self.num_actions, self.gamma,
                                    huber=False)
-        # important sampling from Schaul et al, 2015
-        # > w_i = (1/N)^beta * (1/P(i))^beta
+        # important sampling related to Schaul et al, 2015
+        # > w_i proportional to (1/P(i))^beta
         # where beta is annealed from 0 to 1
+        # > for every training sample --> we rescale so that sum(w_i) = (current batch size / self.batch_size)
         # P(i) = sample_probs in dsets
         # --> shape = batch_size
-        weights = tf.math.pow(tf.math.divide(1., inputs[-2] * tf.cast(tf.shape(inputs[-2])[0], tf.float32)),
-                              inputs[-1])
+        raw_weights = tf.math.pow(tf.math.divide(1., inputs[-2]), inputs[-1])
+        weights = (tf.math.divide(raw_weights, tf.math.reduce_sum(raw_weights)) *
+                   tf.math.divide(tf.cast(tf.shape(inputs[-2])[0], tf.float32), self.batch_size))
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_sum(weights * Q_err),
+                                           "weights": weights,
                                            "TD": Q_err})  # Temporal Difference (batch_size)
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
 
@@ -323,12 +329,12 @@ class QAgent(Agent):
             return None
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=1)
+                                  verbose=0)
         # save all the samples
         cnames = ["state", "state_t1", "action", "reward", "termination"]
         for v in dset.batch(self.batch_size):
             vout = self.kmodel(v)
-            TD = vout["TD"].numpy() + 1e-5
+            TD = np.exp(self.alpha * (vout["TD"].numpy() + 1e-5))
             dat_np = [v[cn].numpy() for cn in cnames]
             for i in range(len(TD)):
                 self.mem_buffer.append(TD[i],
@@ -352,14 +358,14 @@ class QAgent(Agent):
                             "sample_probs": np.ones(1,),
                             "beta": np.zeros(1,)})
         # TODO: assumes only 0th state is useful
-        #   ~ have to adjust for image-based models
-        self.mem_buffer.append(vout["TD"].numpy()[0] + 1e-5,
+        #   ~ have to adjust for multi-domain models
+        self.mem_buffer.append(np.exp(self.alpha * (vout["TD"].numpy()[0] + 1e-5)),
                                [state[0], state_t1[0], action, reward, termination])
 
     def end_epoch(self):
         self.run_iface.rand_act_prob *= self.rand_act_decay
         # TODO: this should be hyperparam
-        self.beta = min(1., self.beta + .01)
+        self.beta = min(1., self.beta + .005)
 
 
 class ExpModel(ScalarModel):
