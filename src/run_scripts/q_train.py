@@ -60,9 +60,9 @@ def build_agent(agent_name: str, action_dims: int, state_dims: int,
                                         drop_rate=0.05,
                                         gamma=0.99,
                                         tau=.05,
-                                        num_batch_sample=1,
                                         train_epoch=1,
-                                        batch_size=64)
+                                        batch_size=64,
+                                        alpha=0.1 / reward_scale)
     elif agent_name == "dqn_cont":
         return build_dense_qagent_cont(action_bounds=action_bounds,
                                         num_observations=state_dims,
@@ -148,15 +148,15 @@ def run_and_train(env_config: EnvConfig,
 
 
 if __name__ == "__main__":
-    # env_config = Envs.cartpole.value
-    # reward_scale = env_config.run_length
-    env_config = Envs.lunar.value
-    reward_scale = 200  # def of successful trial
+    env_config = Envs.cartpole.value
+    reward_scale = env_config.run_length
+    # env_config = Envs.lunar.value
+    # reward_scale = 200  # def of successful trial
     # (env_config, def_params) = Envs.acrobot.value
     # (env_config, def_params) = Envs.pendulum.value
     # (env_config, def_params) = Envs.lunar_continuous.value
 
-    agent = build_agent("dqn_distro", env_config.num_actions, env_config.num_obs,
+    agent = build_agent("dqn", env_config.num_actions, env_config.num_obs,
                         reward_scale=reward_scale)
     reward_seq = run_and_train(env_config, agent, num_runs=200,
                                seed_runs=5,

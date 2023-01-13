@@ -89,8 +89,8 @@ class TestPQ(TestCase):
             self.assertTrue(len(seg_lengths) == self.batch_size)
             tot_length = sum(seg_lengths)
             # test the popping
-            self.assertTrue(tot_length == self.buffer_size - (i + 1) * self.batch_size)
-            self.assertTrue(len(self.PQ._hpq) == tot_length)
+            self.assertTrue(tot_length == self.buffer_size - i * self.batch_size)
+            self.assertTrue((len(self.PQ._hpq) + self.batch_size) == tot_length)
 
 
 class TestPQsmallbuff(TestCase):

@@ -153,7 +153,7 @@ class TestDQN(TestCase):
 
     def test_reward_button(self):
         # train model a few times
-        for i in range(600):
+        for i in range(800):
             self.QA.train()
             self.QA._copy_model()
             if i % 10 == 0:

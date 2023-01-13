@@ -171,10 +171,6 @@ class MemoryBufferPQ:
         if len(seg_bounds) < self.batch_size + 1:
             seg_bounds.append(len(self._hpq))
         self._segment_bounds = seg_bounds
-        # safety check: if some segments are empty --> require segment bounds
-        #   to be reset
-        if np.any(np.array(self._segment_bounds[:-1]) == np.array(self._segment_bounds[1:])):
-            self._segment_bounds = None
 
     def pull_samples(self):
         """Pull samples
@@ -194,10 +190,14 @@ class MemoryBufferPQ:
         # segment lengths are the true sampling probabilities
         # NOTE: should be calculated before popping occurs!
         seg_lengths = [s2 - s1 for s1, s2 in zip(self._segment_bounds[:-1],
-                                                 self._segment_bounds[1:])]
+                                                 self._segment_bounds[1:])
+                       if (s2 - s1) > 0]
 
         ret = []
         for i in range(len(self._segment_bounds) - 1):
+            # ignore empty segments:
+            if self._segment_bounds[i+1] <= self._segment_bounds[i]:
+                continue
             ind = self.rng.integers(self._segment_bounds[i],
                                     self._segment_bounds[i + 1])
             v = heap_pop_target(self._hpq, ind)
