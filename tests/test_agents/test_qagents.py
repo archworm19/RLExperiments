@@ -132,10 +132,11 @@ class TestDQN(TestCase):
                          rng,
                          2, 2,
                          gamma=0.9,
-                         tau=.5)
+                         tau=.5,
+                         batch_size=32)
         # load in data:
         self.r = 2
-        dat = _fake_data_reward_button(100, r=self.r)
+        dat = _fake_data_reward_button(500, r=self.r)
         for i in range(len(dat[0])):
             self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
                               dat[3][i], dat[4][i])
@@ -152,9 +153,11 @@ class TestDQN(TestCase):
 
     def test_reward_button(self):
         # train model a few times
-        for _ in range(200):
+        for i in range(600):
             self.QA.train()
             self.QA._copy_model()
+            if i % 10 == 0:
+                self.QA.end_epoch()
         # expectation?
         # Q learning: Q(t) = r_{t+1} + gamma * max_{a} [ Q(t+1) ]
         #       with 'reward button' --> can get reward in any state

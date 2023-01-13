@@ -171,7 +171,6 @@ class QAgent(Agent):
                  gamma: float = 0.7,
                  tau: float = 0.01,
                  batch_size: int = 128,
-                 num_batch_sample: int = 8,
                  train_epoch: int = 1,
                  rand_act_decay: float = 0.95):
         """
@@ -204,22 +203,21 @@ class QAgent(Agent):
                 after training eval, eval weights are copied to selection
                 where update follows selection <- tau * eval + (1 - tau) * selection
             batch_size (int):
-            num_batch_sample (int):
-                number of batches to sample for a given training step
             train_epoch (int):
             rand_act_decay (float): how much the probability of a random
                 action decays at end of each epoch
         """
+        # TODO: we're missing probability scaling system
+        #   = alpha in Schaul et al, 2015
         super(QAgent, self).__init__()
         self.run_iface = run_iface
-        self.mem_buffer = MemoryBufferPQ(rng, 500000, self.batch_size)
+        self.mem_buffer = MemoryBufferPQ(rng, 500000, batch_size, 64)
         self.free_model = model_builder()
         self.memory_model = model_builder()
         self.num_actions = num_actions
         self.gamma = gamma
         self.tau = tau
         self.batch_size = batch_size
-        self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
         self.rand_act_decay = rand_act_decay
@@ -258,7 +256,8 @@ class QAgent(Agent):
                               inputs[-1])
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_sum(weights * Q_err)})
+                                  outputs={"loss": tf.math.reduce_sum(weights * Q_err),
+                                           "TD": Q_err})  # Temporal Difference (batch_size)
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
 
         self.run_iface.rand_act_prob = 1.
@@ -293,23 +292,24 @@ class QAgent(Agent):
         copy_model(self.free_model, self.memory_model, self.tau)
 
     def _draw_sample(self):
-        dat, seg_lengths = self.mem_buffer.pull_samples(self.num_batch_sample * self.batch_size)
+        dat, seg_lengths = self.mem_buffer.pull_samples()
         if dat is None:
             return None
         nz = ["state", "state_t1", "action", "reward", "termination"]
         d = {}
         for i, name in enumerate(nz):
             d[name] = np.array([dj[1][i] for dj in dat])
-        # TODO: kinda meh design
-        d["action"] = _one_hot(d["action"].astype(np.int32), self.num_actions)
 
+        # TODO: this should be adjust to use probability scale (alpha)
         # calc P(i) = probability of sampling given element
         seg_lengths = np.array(seg_lengths)
         # how to get sampling probability from segment length?
-        #   = (prob of choosing segment) * (1 / segment size)
-        pseg = seg_lengths / np.sum(seg_lengths)  # should all be about the same
+        #   = (prob of selecting segment) * (prob of selecting elem from segment)
+        #   = (1 / num_seg) * (1 / segment size)
+        pseg = 1. / len(seg_lengths)
         sample_probs = pseg * (1. / seg_lengths)
         d["sample_probs"] = sample_probs
+        d["beta"] = [self.beta] * len(seg_lengths)
         return tf.data.Dataset.from_tensor_slices(d)
 
     def train(self, debug: bool = False):
@@ -323,7 +323,17 @@ class QAgent(Agent):
             return None
         history = self.kmodel.fit(dset.batch(self.batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=0)
+                                  verbose=1)
+        # save all the samples
+        cnames = ["state", "state_t1", "action", "reward", "termination"]
+        for v in dset.batch(self.batch_size):
+            vout = self.kmodel(v)
+            TD = vout["TD"].numpy() + 1e-5
+            dat_np = [v[cn].numpy() for cn in cnames]
+            for i in range(len(TD)):
+                self.mem_buffer.append(TD[i],
+                                       [dnp[i] for dnp in dat_np])
+            
         return history
 
     def save_data(self,
@@ -333,13 +343,18 @@ class QAgent(Agent):
                   reward: float,
                   termination: bool):
         # NOTE: only saves a single step
-        vout = self.kmodel({"state": [np.array(state[0])[None]],
-                            "state_t1": [np.array(state_t1[0])[None]],
-                            "action": np.array(action)[None],
+        action = _one_hot(action[None], self.num_actions).astype(np.int32)[0]
+        vout = self.kmodel({"state": np.array(state[0])[None],
+                            "state_t1": np.array(state_t1[0])[None],
+                            "action": action[None],
                             "reward": np.array(reward)[None],
-                            "termination": 1. * np.array(termination)[None]})
-        self.mem_buffer.append(vout["loss"],
-                               [state, state_t1, action, reward, termination])
+                            "termination": 1. * np.array(termination)[None],
+                            "sample_probs": np.ones(1,),
+                            "beta": np.zeros(1,)})
+        # TODO: assumes only 0th state is useful
+        #   ~ have to adjust for image-based models
+        self.mem_buffer.append(vout["TD"].numpy()[0] + 1e-5,
+                               [state[0], state_t1[0], action, reward, termination])
 
     def end_epoch(self):
         self.run_iface.rand_act_prob *= self.rand_act_decay

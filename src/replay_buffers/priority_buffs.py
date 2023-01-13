@@ -191,6 +191,11 @@ class MemoryBufferPQ:
         if self._segment_bounds is None:
             return None, None
 
+        # segment lengths are the true sampling probabilities
+        # NOTE: should be calculated before popping occurs!
+        seg_lengths = [s2 - s1 for s1, s2 in zip(self._segment_bounds[:-1],
+                                                 self._segment_bounds[1:])]
+
         ret = []
         for i in range(len(self._segment_bounds) - 1):
             ind = self.rng.integers(self._segment_bounds[i],
@@ -200,11 +205,9 @@ class MemoryBufferPQ:
             # adjust segment sizes to maintain consistency
             for j in range(i+1, len(self._segment_bounds)):
                 self._segment_bounds[j] = self._segment_bounds[j] - 1
-        # segment lengths are the true sampling probabilities
-        seg_lengths = [s2 - s1 for s1, s2 in zip(self._segment_bounds[:-1],
-                                                 self._segment_bounds[1:])]
+
         # safety check: if some segments are empty --> require segment bounds
         #   to be reset
         if np.any(np.array(self._segment_bounds[:-1]) == np.array(self._segment_bounds[1:])):
-            self._segment_bounds = None
+            self._calculate_segment_bounds()
         return ret, seg_lengths
