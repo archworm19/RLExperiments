@@ -12,9 +12,6 @@ import tensorflow as tf
 from typing import Dict, List, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
-from arch_layers.simple_networks import DenseNetwork
-
 from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont, QAgent_distro
 from run_scripts.utils import DenseScalar, DenseScalarPi, DenseDistro
 
@@ -38,7 +35,6 @@ class EnvConfigCont:
     run_length: int
 
 
-
 class EnvsDiscrete(Enum):
     cartpole = EnvConfig("CartPole-v1", {}, 2, 4, 1000)
     lunar = EnvConfig("LunarLander-v2", {}, 4, 8, 1000)
@@ -47,7 +43,7 @@ class EnvsDiscrete(Enum):
 
 class EnvsContinuous(Enum):
     pendulum = EnvConfig('Pendulum-v1', {}, [(-2., 2.)],
-                         3, 500, True)
+                         3, 500)
     lunar_continuous = EnvConfig("LunarLander-v2", {"continuous": True},
                                   [(-1., 1.), (-1., 1.)],
                                   8, 1000)
