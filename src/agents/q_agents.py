@@ -173,7 +173,9 @@ class QAgent(Agent):
                  batch_size: int = 128,
                  train_epoch: int = 1,
                  rand_act_decay: float = 0.95,
-                 alpha: float = 1e-4):
+                 min_qerr: float = -200.,
+                 max_qerr: float = 200.,
+                 alpha: float = 1.):
         """
         Core Bellman Eqn:
             Q_f = free model
@@ -207,7 +209,10 @@ class QAgent(Agent):
             train_epoch (int):
             rand_act_decay (float): how much the probability of a random
                 action decays at end of each epoch
-            alpha (float): prioritization score = np.exp(alpha * TD_error)
+            min_qerr (float):
+            max_qerr (float):
+            alpha (float):
+                priority = exp((x - min) * (alpha / range))
         """
         # TODO: we're missing probability scaling system
         #   = alpha in Schaul et al, 2015
@@ -224,6 +229,9 @@ class QAgent(Agent):
         self.rng = rng
         self.rand_act_decay = rand_act_decay
         self.beta = 0.
+        # reward scaling
+        self.min_qerr = min_qerr
+        self.range_qerr = max_qerr - min_qerr
         self.alpha = alpha
 
         inputs = [tf.keras.Input(shape=(num_actions,),
@@ -318,6 +326,12 @@ class QAgent(Agent):
         d["beta"] = [self.beta] * len(seg_lengths)
         return tf.data.Dataset.from_tensor_slices(d)
 
+    def _calc_sample_prob(self, td_error: np.ndarray):
+        # TODO: is there some way to adjust to make softmax work?
+        logv = (td_error - self.min_qerr) * (self.alpha / self.range_qerr)
+        v = np.exp(np.clip(logv, -40., 40.))
+        return v
+
     def train(self, debug: bool = False):
         """train agent on run data
 
@@ -334,7 +348,12 @@ class QAgent(Agent):
         cnames = ["state", "state_t1", "action", "reward", "termination"]
         for v in dset.batch(self.batch_size):
             vout = self.kmodel(v)
-            TD = np.exp(self.alpha * (vout["TD"].numpy() + 1e-5))
+
+            # TODO/TESTING:
+            # if npr.rand() < .02:
+            #    print(vout["weights"])
+
+            TD = self._calc_sample_prob(vout["TD"].numpy())
             dat_np = [v[cn].numpy() for cn in cnames]
             for i in range(len(TD)):
                 self.mem_buffer.append(TD[i],
@@ -355,11 +374,13 @@ class QAgent(Agent):
                             "action": action[None],
                             "reward": np.array(reward)[None],
                             "termination": 1. * np.array(termination)[None],
+                            # NOTE: sample_probs and beat are not used for TD
                             "sample_probs": np.ones(1,),
                             "beta": np.zeros(1,)})
         # TODO: assumes only 0th state is useful
         #   ~ have to adjust for multi-domain models
-        self.mem_buffer.append(np.exp(self.alpha * (vout["TD"].numpy()[0] + 1e-5)),
+        td_score = self._calc_sample_prob(vout["TD"].numpy())
+        self.mem_buffer.append(td_score[0],
                                [state[0], state_t1[0], action, reward, termination])
 
     def end_epoch(self):

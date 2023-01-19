@@ -79,7 +79,9 @@ def build_dense_qagent(num_actions: int = 4,
                        tau: float = 0.15,
                        train_epoch: int = 1,
                        batch_size: int = 128,
-                       alpha: float = 1e-4):
+                       min_qerr: float = -200.,
+                       max_qerr: float = 200.,
+                       alpha: float = 1.):
     rng = npr.default_rng(42)
     def build_q():
         return DenseScalar(embed_dim, layer_sizes, drop_rate)
@@ -91,6 +93,8 @@ def build_dense_qagent(num_actions: int = 4,
                   tau=tau,
                   train_epoch=train_epoch,
                   batch_size=batch_size,
+                  min_qerr=min_qerr,
+                  max_qerr=max_qerr,
                   alpha=alpha)
 
 

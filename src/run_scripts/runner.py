@@ -29,6 +29,9 @@ def runner(env: gym.Env,
         reward = step_output[1]
         termination = step_output[2]
 
+        if debug:
+            print(reward)
+
         agent.save_data([cur_state], [new_state],
                         action, reward,
                         termination)

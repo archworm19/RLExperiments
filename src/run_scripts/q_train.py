@@ -51,7 +51,7 @@ class Envs(Enum):
 # Idea: have this point to builder functions with variables supplied
 # TODO: move agent name to enum
 def build_agent(agent_name: str, action_dims: int, state_dims: int,
-                reward_scale: int,
+                min_reward: float, max_reward: float,
                 action_bounds = None):
     if agent_name == "dqn":
         return build_dense_qagent(num_actions=action_dims,
@@ -62,7 +62,9 @@ def build_agent(agent_name: str, action_dims: int, state_dims: int,
                                         tau=.05,
                                         train_epoch=1,
                                         batch_size=64,
-                                        alpha=0.1 / reward_scale)
+                                        min_qerr=0.,
+                                        max_qerr=(max_reward - min_reward)**2.,
+                                        alpha=5.)
     elif agent_name == "dqn_cont":
         return build_dense_qagent_cont(action_bounds=action_bounds,
                                         num_observations=state_dims,
@@ -149,15 +151,17 @@ def run_and_train(env_config: EnvConfig,
 
 if __name__ == "__main__":
     env_config = Envs.cartpole.value
-    reward_scale = env_config.run_length
+    min_reward = 0.
+    max_reward = env_config.run_length
     # env_config = Envs.lunar.value
-    # reward_scale = 200  # def of successful trial
+    # min_reward = -200.
+    # max_reward = 200.
     # (env_config, def_params) = Envs.acrobot.value
     # (env_config, def_params) = Envs.pendulum.value
     # (env_config, def_params) = Envs.lunar_continuous.value
 
     agent = build_agent("dqn", env_config.num_actions, env_config.num_obs,
-                        reward_scale=reward_scale)
+                        min_reward=min_reward, max_reward=max_reward)
     reward_seq = run_and_train(env_config, agent, num_runs=200,
                                seed_runs=5,
                                step_per_train=1,

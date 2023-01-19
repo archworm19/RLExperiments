@@ -160,6 +160,9 @@ class MemoryBufferPQ:
         seg_bounds = [0]
         run_sum = 0.
         for i, v in enumerate(self._hpq):
+            # TODO: early stopping in case we've stepped too far
+            if len(seg_bounds) >= (self.batch_size + 1):
+                break
             vp = v.priority * -1.0
             run_sum += vp
             if run_sum >= Z / num_seg:
