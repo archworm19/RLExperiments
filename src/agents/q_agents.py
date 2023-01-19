@@ -86,7 +86,6 @@ class RunIface:
         Returns:
             int: index of selected action
         """
-        print(self.rand_act_prob)
         if not test_mode:
             self.rand_act_prob = max(self.min_rand_act_prob,
                                      self.rand_act_decay * self.rand_act_prob)
