@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 @dataclass
 class RunData:
+    # TODO: does anyone still use this?
     # TODO: for larger datasets --> this will need
     # to be changed to an interface
     states: List

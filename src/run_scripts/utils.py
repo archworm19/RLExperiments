@@ -1,3 +1,4 @@
+"""Sub-models used by model builders"""
 import tensorflow as tf
 from tensorflow.keras.layers import Dense
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel

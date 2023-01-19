@@ -1,5 +1,4 @@
 """Testing qagents on fake tasks"""
-from re import S
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
