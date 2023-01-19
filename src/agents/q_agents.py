@@ -5,7 +5,6 @@
                 call has the following signature:
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
 """
-from re import A
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
@@ -46,16 +45,25 @@ def copy_model(send_model: Layer, rec_model: Layer,
 
 
 class RunIface:
+    # epsilon-greedy run interface ~ anneal random act prob
     # handles interfacing with simulation
     # build other models on top of this
     # factored out of agent to allow for different strategies
     #       ... might not be worth it
 
     def __init__(self,
-                 num_actions: int, rand_act_prob: float,
-                 rng: npr.Generator):
+                 num_actions: int,
+                 rng: npr.Generator,
+                 min_rand_act_prob: float = 0.05,
+                 T_rand_act_prob: float = 5e3):
+        # anneal rand_act_prob from 1 to min_rand_act_prob
+        #   in T_rand_act_prob action selection steps
         self.num_actions = num_actions
-        self.rand_act_prob = rand_act_prob
+        self.rand_act_prob = 1.
+        # min_rand_act_prob = mrap = x^(T)
+        #   T log x = log(mrap) --> x = exp(log(mrap) / T)
+        self.rand_act_decay = np.exp(np.log(min_rand_act_prob) / T_rand_act_prob)
+        self.min_rand_act_prob = min_rand_act_prob
         self.rng = rng
 
     def init_action(self):
@@ -64,12 +72,9 @@ class RunIface:
     def select_action(self, model: ScalarModel, state: List[np.ndarray],
                       test_mode: bool = False, debug: bool = False):
         """epsilon greedy action selection
-            train:
-                r = random float
-                if r < rand_act_prob --> random action select
-                else --> greedy choice
-            test:
-                --> greedy choice
+            r = random float
+            if r < rand_act_prob --> random action select
+            else --> greedy choice
 
         Args:
             model (ScalarModel): model that outputs Q evaluations for state-action
@@ -81,7 +86,12 @@ class RunIface:
         Returns:
             int: index of selected action
         """
-        if (not test_mode) and (self.rng.random() < self.rand_act_prob):
+        print(self.rand_act_prob)
+        if not test_mode:
+            self.rand_act_prob = max(self.min_rand_act_prob,
+                                     self.rand_act_decay * self.rand_act_prob)
+
+        if self.rng.random() < self.rand_act_prob:
             if debug:
                 print("rand select")
             return self.rng.integers(0, self.num_actions)

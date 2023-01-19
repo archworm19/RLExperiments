@@ -71,7 +71,7 @@ def build_discrete_q(env: EnvsDiscrete,
     rng = npr.default_rng(42)
     def build_q():
         return DenseScalar(embed_dim, layer_sizes, drop_rate)
-    run_iface = RunIface(env.value.dims_actions, 1., rng)
+    run_iface = RunIface(env.value.dims_actions, rng)
     agent = QAgent(run_iface,
                    build_q,
                    rng,
@@ -105,7 +105,7 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
     rng = npr.default_rng(42)
     def build_q():
         return DenseDistro(embed_dim, layer_sizes, drop_rate, num_atoms)
-    run_iface = RunIface(num_actions, 1., rng)
+    run_iface = RunIface(num_actions, rng)
     ind0 = np.argmin(np.fabs(np.linspace(Vmin, Vmax, num_atoms)))
     v0 = [0] * num_atoms
     v0[ind0] = 1.
@@ -123,8 +123,7 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
                          num_batch_sample=num_batch_sample,
                          train_epoch=train_epoch,
                          batch_size=batch_size,
-                         learning_rate=.002,
-                         rand_act_decay=0.95)
+                         learning_rate=.002)
     return env_run, env_disp, Qa
 
 

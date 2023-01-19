@@ -15,7 +15,7 @@ def run_and_train(env_run,  # TODO: object type?
                   env_disp,  # TODO: object type?
                   agent: Agent,  # TODO: need more specific interface for discrete/update agent
                   run_length: int = 1000,
-                  num_runs: int = 300,
+                  num_runs: int = 400,
                   show_progress: bool = True,
                   seed_runs: int = 20,
                   step_per_train: int = 1,
@@ -50,7 +50,7 @@ def run_and_train(env_run,  # TODO: object type?
                             step_per_copy=step_per_copy)
         rews.append(np.sum(np.array(rewards)))
 
-        print(rews[-1])
+        print("train mode: {0}, reward: {1}".format(train_mode, rews[-1]))
 
         # signal end of epoch
         agent.end_epoch()
