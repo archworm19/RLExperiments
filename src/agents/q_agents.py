@@ -187,7 +187,7 @@ class QAgent(Agent):
                  model_builder: Callable[[], ScalarModel],
                  rng: npr.Generator,
                  num_actions: int,
-                 state_dims: int,
+                 state_dims: List[Tuple[int]],
                  gamma: float = 0.7,
                  tau: float = 0.01,
                  batch_size: int = 128,
@@ -215,9 +215,9 @@ class QAgent(Agent):
             rng (npr.Generator):
             num_actions (int): number of actions available to
                 the agent
-            state_dims (int): number of dimensions in state
-                assumes state can be easily represented by
-                single tensor
+            state_dims (List[List[int]]): shape of each state tensor
+                Ex: if we want to supply base state + pixels -->
+                    it's useful to subit them as separate state tensors
             gamma (float): discount factor
             tau (float): update rate (often referred to as alpha in literature)
                 after training eval, eval weights are copied to selection
@@ -229,10 +229,6 @@ class QAgent(Agent):
         """
         super(QAgent, self).__init__()
         self.run_iface = run_iface
-        self.mem_buffer = MemoryBuffer(["action", "reward",
-                                        "state", "state_t1",
-                                        "termination"], rng,
-                                        500000)
         self.free_model = model_builder()
         self.memory_model = model_builder()
         self.num_actions = num_actions
@@ -243,23 +239,33 @@ class QAgent(Agent):
         self.train_epoch = train_epoch
         self.rng = rng
 
+        s0_names = ["state" + str(i) for i in range(len(state_dims))]
+        s1_names = ["state" + str(i) + "_t1" for i in range(len(state_dims))]
+        s0_inputs = [tf.keras.Input(shape=s, dtype=tf.float32, name=n)
+                     for s, n in zip(state_dims, s0_names)]
+        s1_inputs = [tf.keras.Input(shape=s, dtype=tf.float32, name=n)
+                     for s, n in zip(state_dims, s1_names)]
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
                   tf.keras.Input(shape=(),
                                  name="reward", dtype=tf.float32),
-                  tf.keras.Input(shape=(state_dims,),
-                                 name="state", dtype=tf.float32),
-                  tf.keras.Input(shape=(state_dims,),
-                                 name="state_t1", dtype=tf.float32),
                   tf.keras.Input(shape=(),
                                  name="termination", dtype=tf.float32)]
+        inputs = inputs + s0_inputs + s1_inputs
+        self.s0_names = s0_names
+        self.s1_names = s1_names
+
+        self.mem_buffer = MemoryBuffer(["action", "reward",
+                                        "termination"] + self.s0_names + self.s1_names,
+                                        rng,
+                                        500000)
         # loss ~ discrete Q error framework
         Q_err, _ = calc_q_error_sm(self.free_model,
                                    self.free_model,
                                    self.memory_model,
                                    inputs[0], inputs[1],
-                                   [inputs[2]], [inputs[3]],
-                                   inputs[4],
+                                   s0_inputs, s1_inputs,
+                                   inputs[2],
                                    self.num_actions, self.gamma,
                                    huber=False)       
         self.kmodel = CustomModel("loss",
@@ -322,12 +328,13 @@ class QAgent(Agent):
                   action: Union[int, float, List],
                   reward: float,
                   termination: bool):
-        # NOTE: only saves a single step
-        d = {"state": state[0],
-             "state_t1": state_t1[0],
-             "action": action,
+        d = {"action": action,
              "reward": reward,
              "termination": termination}
+        for n, v in zip(self.s0_names, state):
+            d[n] = v
+        for n, v in zip(self.s1_names, state_t1):
+            d[n] = v
         self.mem_buffer.append(d)
 
     def end_epoch(self):

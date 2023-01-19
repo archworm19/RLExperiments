@@ -123,13 +123,13 @@ class TestDQN(TestCase):
 
     def setUp(self) -> None:
         rng = npr.default_rng(42)
-        run_iface = RunIface(2, 0.25, rng)
+        run_iface = RunIface(2, rng)
         def q_builder():
             return DenseScalar()
         self.QA = QAgent(run_iface,
                          q_builder,
                          rng,
-                         2, 2,
+                         2, [(2,)],
                          gamma=0.9,
                          tau=.5)
         # load in data:
@@ -137,13 +137,13 @@ class TestDQN(TestCase):
         dat = _fake_data_reward_button(100, r=self.r)
         for i in range(len(dat[0])):
             self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
-                              dat[3][i], dat[4][i])
+                               dat[3][i], dat[4][i])
 
     def test_dset_build(self):
         dset = self.QA._draw_sample().batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
-            self.assertTrue(tf.reduce_all(tf.shape(v["state"]) ==
+            self.assertTrue(tf.reduce_all(tf.shape(v["state0"]) ==
                                           tf.constant([32, 2], dtype=tf.int32)))
             vout = self.QA.kmodel(v)
             self.assertTrue(len(tf.shape(vout["loss"]).numpy()) == 0)
@@ -173,7 +173,7 @@ class TestDQN(TestCase):
 
         for v in self.QA._draw_sample().batch(32):
             rews = v["reward"].numpy()
-            q = self.QA.memory_model(v["action"], [v["state"]]).numpy()
+            q = self.QA.memory_model(v["action"], [v["state0"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
             self.assertAlmostEqual(exp_q, q_rew, places=1)
@@ -185,7 +185,7 @@ class TestDQNdistro(TestCase):
 
     def setUp(self) -> None:
         rng = npr.default_rng(42)
-        run_iface = RunIface(2, 0.25, rng)
+        run_iface = RunIface(2, rng)
         def q_builder():
             return DenseDistro(21)
         # assumes 21 atoms
