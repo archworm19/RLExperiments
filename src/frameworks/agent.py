@@ -33,13 +33,15 @@ class Agent(ABC):
         """
         pass
 
-    def select_action(self, state: List[np.ndarray], debug: bool):
+    def select_action(self, state: List[np.ndarray], test_mode: bool, debug: bool):
         """select 
 
         Args:
             state (List[np.ndarray]): set of unbatched input tensors
                 each with shape:
                     ...
+            test_mode (bool): are we in a 'test run' for the agent?
+            debug (bool): debug mode
 
         Returns:
             Union[int, List[float]]:
@@ -83,3 +85,4 @@ class Agent(ABC):
 
     def end_epoch(self):
         """Signal to agent that epoch is over"""
+        pass

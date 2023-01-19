@@ -5,6 +5,7 @@
                 call has the following signature:
                     call(action_t: tf.Tensor, state_t: List[tf.Tensor])
 """
+from re import A
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
@@ -60,8 +61,15 @@ class RunIface:
     def init_action(self):
         return self.rng.integers(0, self.num_actions)
 
-    def select_action(self, model: ScalarModel, state: List[np.ndarray], debug: bool = False):
-        """greedy action selection
+    def select_action(self, model: ScalarModel, state: List[np.ndarray],
+                      test_mode: bool = False, debug: bool = False):
+        """epsilon greedy action selection
+            train:
+                r = random float
+                if r < rand_act_prob --> random action select
+                else --> greedy choice
+            test:
+                --> greedy choice
 
         Args:
             model (ScalarModel): model that outputs Q evaluations for state-action
@@ -73,7 +81,7 @@ class RunIface:
         Returns:
             int: index of selected action
         """
-        if self.rng.random() < self.rand_act_prob:
+        if (not test_mode) and (self.rng.random() < self.rand_act_prob):
             if debug:
                 print("rand select")
             return self.rng.integers(0, self.num_actions)
@@ -133,7 +141,8 @@ class RunIfaceCont:
         mid_pt = np.mean(self.bounds, axis=1)
         return self._noisify_and_clip(mid_pt).tolist()
 
-    def select_action(self, model: ScalarStateModel, state: List[np.ndarray], debug: bool = False):
+    def select_action(self, model: ScalarStateModel, state: List[np.ndarray],
+                      test_mode: bool = False, debug: bool = False):
         """
         Args:
             model (ScalarStateModel): action selection model
@@ -148,7 +157,10 @@ class RunIfaceCont:
         state = [tf.expand_dims(si, 0) for si in state]
         # returns batch_size (1 here) x action_dims
         a = model(state)[0].numpy()
-        a_noise = self._noisify_and_clip(a).tolist()
+        if test_mode:
+            a_noise = a
+        else:
+            a_noise = self._noisify_and_clip(a).tolist()
         if debug:
             print(a)
             print(a_noise)
@@ -171,8 +183,7 @@ class QAgent(Agent):
                  tau: float = 0.01,
                  batch_size: int = 128,
                  num_batch_sample: int = 8,
-                 train_epoch: int = 1,
-                 rand_act_decay: float = 0.95):
+                 train_epoch: int = 1):
         """
         Core Bellman Eqn:
             Q_f = free model
@@ -206,8 +217,6 @@ class QAgent(Agent):
             num_batch_sample (int):
                 number of batches to sample for a given training step
             train_epoch (int):
-            rand_act_decay (float): how much the probability of a random
-                action decays at end of each epoch
         """
         super(QAgent, self).__init__()
         self.run_iface = run_iface
@@ -224,7 +233,6 @@ class QAgent(Agent):
         self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
-        self.rand_act_decay = rand_act_decay
 
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
@@ -249,9 +257,6 @@ class QAgent(Agent):
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(Q_err)})
         self.kmodel.compile(tf.keras.optimizers.Adam(.001))
-
-        self.run_iface.rand_act_prob = 1.
-
         # align the models
         tau_hold = self.tau
         self.tau = 1.
@@ -261,7 +266,8 @@ class QAgent(Agent):
     def init_action(self):
         return self.run_iface.init_action()
 
-    def select_action(self, state: List[np.ndarray], debug: bool = False):
+    def select_action(self, state: List[np.ndarray], test_mode: bool = False,
+                      debug: bool = False):
         """greedy action selection
 
         Args:
@@ -272,7 +278,8 @@ class QAgent(Agent):
         Returns:
             int: index of selected action
         """
-        return self.run_iface.select_action(self.memory_model, state, debug=debug)
+        return self.run_iface.select_action(self.memory_model, state,
+                                            test_mode=test_mode, debug=debug)
 
     def _copy_model(self, debug: bool = False):
         # copy weights from free_model to memory_model
@@ -315,7 +322,7 @@ class QAgent(Agent):
         self.mem_buffer.append(d)
 
     def end_epoch(self):
-        self.run_iface.rand_act_prob *= self.rand_act_decay
+        pass
 
 
 class ExpModel(ScalarModel):
@@ -372,7 +379,6 @@ class QAgent_distro(Agent):
                  batch_size: int = 128,
                  num_batch_sample: int = 1,
                  train_epoch: int = 1,
-                 rand_act_decay: float = 0.95,
                  learning_rate: float = .001,
                  mem_buffer_size: int = 500000):
         # see QAgent docstring
@@ -395,7 +401,6 @@ class QAgent_distro(Agent):
         self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
-        self.rand_act_decay = rand_act_decay
 
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
@@ -422,9 +427,6 @@ class QAgent_distro(Agent):
                                            "weights": weights,  # TODO: TESTING
                                            "action_vector": act_vect})  # TODO: TESTING
         self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
-
-        self.run_iface.rand_act_prob = 1.
-
         # align the models
         tau_hold = self.tau
         self.tau = 1.
@@ -434,7 +436,8 @@ class QAgent_distro(Agent):
     def init_action(self):
         return self.run_iface.init_action()
 
-    def select_action(self, state: List[np.ndarray], debug: bool = False):
+    def select_action(self, state: List[np.ndarray],
+                      test_mode: bool = False, debug: bool = False):
         """greedy action selection
 
         Args:
@@ -451,7 +454,8 @@ class QAgent_distro(Agent):
             prob = tf.nn.softmax(self.memory_model(action_t, state_t), axis=1).numpy()
             print(np.round(prob, decimals=2))
 
-        return self.run_iface.select_action(self.exp_model, state, debug=debug)
+        return self.run_iface.select_action(self.exp_model, state,
+                                            test_mode=test_mode, debug=debug)
 
     def _copy_model(self, debug: bool = False):
         # copy weights from free_model to memory_model
@@ -494,7 +498,7 @@ class QAgent_distro(Agent):
         self.mem_buffer.append(d)
 
     def end_epoch(self):
-        self.run_iface.rand_act_prob *= self.rand_act_decay
+        pass
 
 
 # Continuous Agents
@@ -598,7 +602,8 @@ class QAgent_cont(Agent):
     def init_action(self):
         return self.run_iface.init_action()
 
-    def select_action(self, state: List[np.ndarray], debug: bool = False):
+    def select_action(self, state: List[np.ndarray],
+                      test_mode: bool = False, debug: bool = False):
         """greedy action selection
 
         Args:
@@ -609,11 +614,12 @@ class QAgent_cont(Agent):
         Returns:
             int: index of selected action
         """
-        act = self.run_iface.select_action(self.piprime_model, state, debug=debug)
+        act = self.run_iface.select_action(self.piprime_model, state,
+                                           test_mode=test_mode, debug=debug)
         if debug:
             print(self.qprime_model(tf.expand_dims(tf.constant(act), 0),
                                     [tf.expand_dims(si, 0) for si in state]))
-        return self.run_iface.select_action(self.piprime_model, state, debug=debug)
+        return act
 
     def _copy_model(self, debug: bool = False):
         copy_model(self.q_model, self.qprime_model, self.tau)
