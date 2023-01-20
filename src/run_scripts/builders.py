@@ -65,17 +65,19 @@ def build_discrete_q(env: EnvsDiscrete,
                      tau: float = 0.05,
                      train_epoch: int = 1,
                      batch_size: int = 64):
+    # states: 1. dim defined by env, 2. time (1)
     # build environment
     env_run, env_disp = _build_env(env.value)
     # build the discrete q learning model
     rng = npr.default_rng(42)
     def build_q():
-        return DenseScalar(embed_dim, layer_sizes, drop_rate)
+        return DenseScalar([embed_dim] * 2, layer_sizes, drop_rate)
     run_iface = RunIface(env.value.dims_actions, rng)
     agent = QAgent(run_iface,
                    build_q,
                    rng,
-                   env.value.dims_actions, env.value.dims_obs,
+                   env.value.dims_actions,
+                   [(env.value.dims_obs,), (1,)],
                    gamma=gamma,
                    tau=tau,
                    num_batch_sample=num_batch_sample,

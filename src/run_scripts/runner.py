@@ -19,12 +19,14 @@ def runner(env: gym.Env,
     # action model must take in env.step output
     # NOTE: this function should be agnostic to continuous vs. discrete
     #   control as long as agent and environment are compatible
+    # NOTE: model records 1. states, 2. normalized time, 3. TODO: pixels
     test_mode = not train_mode
     action = agent.init_action()
     cur_state = env.step(action)[0]
     save_rewards = []
     for i in range(max_step):
-        action = agent.select_action([cur_state], test_mode=test_mode, debug=debug)
+        action = agent.select_action([cur_state, [(i + 0.) / max_step]],
+                                     test_mode=test_mode, debug=debug)
         step_output = env.step(action)
         new_state = step_output[0]
         reward = step_output[1]
@@ -32,7 +34,8 @@ def runner(env: gym.Env,
 
         # only save training data
         if train_mode:
-            agent.save_data([cur_state], [new_state],
+            agent.save_data([cur_state, [(i + 0.) / max_step]],
+                            [new_state, [(i + 1.) / max_step]],
                             action, reward,
                             termination)
 

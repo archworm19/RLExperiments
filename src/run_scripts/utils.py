@@ -7,20 +7,22 @@ from typing import List, Tuple
 
 
 class DenseScalar(ScalarModel):
+    # > run all states thru embeddings
+    # > concat
+    # > run thru dense network 
     def __init__(self,
-                 embed_dim: int,
+                 embed_dims: List[int],
                  layer_sizes: List[int],
                  drop_rate: float):
         super(DenseScalar, self).__init__()
-        self.d_act = Dense(embed_dim)
-        self.d_state = Dense(embed_dim)
+        self.d_act = Dense(embed_dims[0])
+        self.d_states = [Dense(ed) for ed in embed_dims]
         self.net = DenseNetwork(layer_sizes, 1, drop_rate)
 
     def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
-        # NOTE: only uses 0th tensor in state_t
         x_a = self.d_act(action_t)
-        x_s = self.d_state(state_t[0])
-        yp = self.net(tf.concat([x_a, x_s], axis=1))
+        x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]
+        yp = self.net(tf.concat([x_a] + x_s, axis=1))
         return yp[:, 0]  # to scalar
 
 
