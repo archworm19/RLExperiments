@@ -270,7 +270,7 @@ class TestDQNcont(TestCase):
             return DenseScalarPi(bounds, 4, [4], 0.)
         self.state_dims = 3
         self.QA = QAgent_cont(run_iface, q_builder, pi_builder,
-                              rng, len(bounds), self.state_dims,
+                              rng, len(bounds), [(self.state_dims,)],
                               tau=0.1,
                               critic_lr=.01, actor_lr=.005)
         self.buffer_size = 5000
@@ -290,7 +290,7 @@ class TestDQNcont(TestCase):
         dset = self.QA._draw_sample().batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
-            self.assertTrue(tf.reduce_all(tf.shape(v["state"]) ==
+            self.assertTrue(tf.reduce_all(tf.shape(v["state0"]) ==
                                           tf.constant([32, self.state_dims], dtype=tf.int32)))
             vout = self.QA.kmodel(v)
             self.assertTrue(len(tf.shape(vout["loss"]).numpy()) == 0)
@@ -312,14 +312,14 @@ class TestDQNcont(TestCase):
         #   1. Q(pi, state_t), 2. r + gamma * Q(pi, state_t1)
         for v in self.QA._draw_sample().batch(32):
             # action calc
-            act = self.QA.piprime_model([v["state"]])
+            act = self.QA.piprime_model([v["state0"]])
             self.assertTrue(tf.math.reduce_all(act >= 0.95))
 
             # q calc ~ this is basically just testing whether
             # q loss in model is calculated correctly
-            q = self.QA.qprime_model(v["action"], [v["state"]])
-            act_t1 = self.QA.piprime_model([v["state_t1"]])
-            q_t1 = self.QA.qprime_model(act_t1, [v["state_t1"]])
+            q = self.QA.qprime_model(v["action"], [v["state0"]])
+            act_t1 = self.QA.piprime_model([v["state0_t1"]])
+            q_t1 = self.QA.qprime_model(act_t1, [v["state0_t1"]])
             target = tf.cast(v["reward"], q_t1.dtype) + self.QA.gamma * q_t1
             self.assertTrue(tf.math.reduce_mean(tf.math.pow(target - q, 2.)) < .2)
             break
@@ -337,15 +337,15 @@ class TestDQNcont(TestCase):
 
         for v in self.QA._draw_sample().batch(128):
             # action calc
-            s = tf.math.reduce_sum(v["state"], axis=1)
-            act = tf.math.reduce_sum(self.QA.piprime_model([v["state"]]), axis=1)
+            s = tf.math.reduce_sum(v["state0"], axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["state0"]]), axis=1)
             # state - action correlation ~ should be high
             corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
             self.assertTrue(corr.numpy() > 0.3)
 
             # correlation with s(t+1)? shouldn't be
-            s = tf.math.reduce_sum(v["state"], axis=1)
-            act = tf.math.reduce_sum(self.QA.piprime_model([v["state_t1"]]), axis=1)
+            s = tf.math.reduce_sum(v["state0"], axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["state0_t1"]]), axis=1)
             corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
             self.assertTrue(corr.numpy() < 0.3)
             break
