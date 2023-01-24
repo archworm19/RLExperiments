@@ -42,9 +42,9 @@ class EnvsDiscrete(Enum):
 
 
 class EnvsContinuous(Enum):
-    pendulum = EnvConfig('Pendulum-v1', {}, [(-2., 2.)],
+    pendulum = EnvConfigCont('Pendulum-v1', {}, [(-2., 2.)],
                          3, 500)
-    lunar_continuous = EnvConfig("LunarLander-v2", {"continuous": True},
+    lunar_continuous = EnvConfigCont("LunarLander-v2", {"continuous": True},
                                   [(-1., 1.), (-1., 1.)],
                                   8, 1000)
 
@@ -98,12 +98,12 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
                            tau: float = 0.05,
                            train_epoch: int = 1,
                            batch_size: int = 64):
+    # states: 1. dim defined by env, 2. time (1)
     # NOTE: num_atoms, Vmin, Vmax specify the support of the distribution
     # build environment
     env_run, env_disp = _build_env(env.value)
     # build agent
     num_actions = env.value.dims_actions
-    num_obs = env.value.dims_obs
     rng = npr.default_rng(42)
     def build_q():
         return DenseDistro(embed_dim, layer_sizes, drop_rate, num_atoms)
@@ -116,7 +116,8 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
     Qa = QAgent_distro(run_iface,
                          build_q,
                          rng,
-                         num_actions, num_obs,
+                         num_actions,
+                         [(env.value.dims_obs,), (1,)],
                          vector0,
                          Vmin=Vmin,
                          Vmax=Vmax,
@@ -140,22 +141,24 @@ def build_continuous_q(env: EnvsContinuous,
                        batch_size: int = 64,
                        sigma: float = 0.2,
                        theta: float = 0.15):
+    # states: 1. dim defined by env, 2. time (1)
     # NOTE: sigma, theta used for correlated noise
     env_run, env_disp = _build_env(env.value)
     # continuous control Q agent
     rng = npr.default_rng(42)
     action_bounds = env.value.action_bounds
+    embed_dims = [embed_dim] * len(action_bounds)
     def build_q():
-        return DenseScalar(embed_dim, layer_sizes, drop_rate)
+        return DenseScalar(embed_dims, layer_sizes, drop_rate)
     def build_pi():
-        return DenseScalarPi(action_bounds, embed_dim, layer_sizes, drop_rate)
+        return DenseScalarPi(action_bounds, embed_dims, layer_sizes, drop_rate)
     run_iface = RunIfaceCont(action_bounds,
                              [theta] * len(action_bounds),
                              [sigma] * len(action_bounds),
                              rng)
     Qa = QAgent_cont(run_iface, build_q, build_pi, rng,
                         len(action_bounds),
-                        env.value.dims_obs,
+                        [(env.value.dims_obs,), (1,)],
                         gamma=gamma,
                         tau=tau,
                         batch_size=batch_size,
