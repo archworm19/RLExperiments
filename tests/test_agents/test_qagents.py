@@ -195,7 +195,7 @@ class TestDQNdistro(TestCase):
         self.QA = QAgent_distro(run_iface,
                                 q_builder,
                                 rng,
-                                2, 2,
+                                2, [(2,)],
                                 vector0,
                                 Vmin = -1 * self.Vmax,
                                 Vmax = self.Vmax,
@@ -227,7 +227,7 @@ class TestDQNdistro(TestCase):
         #       assuming high enough gamma --> expected reward approaches Vmax
         for v in self.QA._draw_sample().batch(32):
             # test model expectation
-            exp_q = self.QA.exp_model(v["action"], [v["state"]])
+            exp_q = self.QA.exp_model(v["action"], [v["state0"]])
             self.assertTrue(tf.math.reduce_all(tf.math.abs(self.Vmax - exp_q) < 1.5))
             break
 
@@ -245,8 +245,8 @@ class TestDQNdistro(TestCase):
 
         for v in self.QA._draw_sample().batch(32):
             # test model expectation
-            sum_state = tf.math.reduce_sum(v["state"], axis=1)
-            exp_q = self.QA.exp_model(v["action"], [v["state"]])
+            sum_state = tf.math.reduce_sum(v["state0"], axis=1)
+            exp_q = self.QA.exp_model(v["action"], [v["state0"]])
             term_states = tf.cast(sum_state < 0, tf.float32)
             termq = tf.divide(tf.math.reduce_sum(term_states * exp_q),
                               tf.math.reduce_sum(term_states))
@@ -331,7 +331,7 @@ class TestDQNcont(TestCase):
                                                           state_dims=self.state_dims))
 
         # train each model a few times
-        for _ in range(160):
+        for _ in range(320):
             self.QA.train()
             self.QA._copy_model()
 

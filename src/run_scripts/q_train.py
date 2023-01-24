@@ -21,6 +21,7 @@ def run_and_train(env_run,  # TODO: object type?
                   step_per_train: int = 1,
                   step_per_copy: int = 1,
                   runs_per_display: int = 5,
+                  timeout: bool = False,
                   debug_viz: bool = False):
     # NOTE: assumes env and agent are compatible
     #   should be handled by builder functions
@@ -47,7 +48,8 @@ def run_and_train(env_run,  # TODO: object type?
         rewards = runner(active_env, agent, run_length,
                             debug=debug_set, train_mode=train_mode,
                             step_per_train=step_per_train,
-                            step_per_copy=step_per_copy)
+                            step_per_copy=step_per_copy,
+                            timeout=timeout)
         rews.append(np.sum(np.array(rewards)))
 
         print("train mode: {0}, reward: {1}".format(train_mode, rews[-1]))
@@ -61,5 +63,9 @@ if __name__ == "__main__":
     # cartpole:
     env_run, env_disp, agent = build_discrete_q(EnvsDiscrete.cartpole)
     run_and_train(env_run, env_disp, agent, run_length=EnvsDiscrete.cartpole.value.run_length, seed_runs=10)
+    # lunar lander:
+    # env_run, env_disp, agent = build_discrete_q(EnvsDiscrete.lunar)
+    # run_and_train(env_run, env_disp, agent, run_length=EnvsDiscrete.lunar.value.run_length, seed_runs=10,
+    #               timeout=False, debug_viz=False)
     env_run.close()
     env_disp.close()

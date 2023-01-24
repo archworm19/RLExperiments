@@ -10,6 +10,7 @@ def runner(env: gym.Env,
            step_per_train: int = 1,
            step_per_copy: int = 1,
            train_mode: bool = True,
+           timeout: bool = False,
            debug: bool = False):
     # state-action model
     # s_t --> model --> a_t --> env --> s_{t+1}, r_{t+1}
@@ -20,6 +21,7 @@ def runner(env: gym.Env,
     # NOTE: this function should be agnostic to continuous vs. discrete
     #   control as long as agent and environment are compatible
     # NOTE: model records 1. states, 2. normalized time, 3. TODO: pixels
+    # NOTE: if timeout is set --> end of run marked as termination
     test_mode = not train_mode
     action = agent.init_action()
     cur_state = env.step(action)[0]
@@ -31,6 +33,10 @@ def runner(env: gym.Env,
         new_state = step_output[0]
         reward = step_output[1]
         termination = step_output[2]
+
+        # timeout
+        if (i >= (max_step - 1)) and timeout:
+            termination = True
 
         # only save training data
         if train_mode:
