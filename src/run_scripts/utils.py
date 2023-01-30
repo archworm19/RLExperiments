@@ -27,27 +27,33 @@ class DenseScalar(ScalarModel):
 
 
 class DenseScalarPi(ScalarStateModel):
-    # NOTE: output_i = bounds_i,0 + (bounds_i,1 - bounds_i,0) * sigmoid(f(x))
+    # NOTE: unbounded outputs
     # pi: pi(a | s)
     def __init__(self,
-                 bounds: List[Tuple],
+                 output_dims: int,
                  embed_dims: List[int],
                  layer_sizes: List[int],
-                 drop_rate: float):
+                 drop_rate: float,
+                 bounds: List[Tuple[int]] = None):
         # bounds = list of (lower bound, upper bound) pairs
         super(DenseScalarPi, self).__init__()
         self.d_states = [Dense(ed) for ed in embed_dims]
-        self.d_out = Dense(len(bounds))
+        self.d_out = Dense(output_dims)
         self.net = DenseNetwork(layer_sizes, 1, drop_rate)
-        self.offset = tf.constant([vi[0] for vi in bounds], tf.float32)
-        self.ranges = tf.constant([vi[1] - vi[0] for vi in bounds], tf.float32)
+        if bounds is not None:
+            assert len(bounds) == output_dims, "dim mismatch"
+            self.offsets = tf.constant([bi[0] for bi in bounds], dtype=tf.float32)
+            self.ranges = tf.constant([bi[1] - bi[0] for bi in bounds], dtype=tf.float32)
+            self.activation = tf.math.sigmoid
+        else:
+            self.offsets = 0.
+            self.ranges = 1.
+            self.activation = lambda x: x
 
     def call(self, state_t: List[tf.Tensor]):
         x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]
         yp = self.net(tf.concat(x_s, axis=1))
-        raw_act = self.d_out(yp)
-        # apply bounds via sigmoid:
-        return (self.ranges * tf.math.sigmoid(raw_act)) + self.offset
+        return self.activation(self.d_out(yp)) * self.ranges + self.offsets
 
 
 class DenseDistro(DistroModel):

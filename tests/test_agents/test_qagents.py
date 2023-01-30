@@ -270,7 +270,7 @@ class TestDQNcont(TestCase):
             return DenseScalarPi(bounds, 4, [4], 0.)
         self.state_dims = 3
         self.QA = QAgent_cont(run_iface, q_builder, pi_builder,
-                              rng, len(bounds), [(self.state_dims,)],
+                              rng, bounds, [(self.state_dims,)],
                               tau=0.1,
                               critic_lr=.01, actor_lr=.005)
         self.buffer_size = 5000

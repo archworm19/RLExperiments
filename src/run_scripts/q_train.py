@@ -74,8 +74,14 @@ if __name__ == "__main__":
     #               timeout=False, debug_viz=False)
 
     # pendulum + continuous DQN
-    env_run, env_disp, agent = build_continuous_q(EnvsContinuous.pendulum)
-    run_and_train(env_run, env_disp, agent, run_length=EnvsContinuous.pendulum.value.run_length, seed_runs=10,
+    # env_run, env_disp, agent = build_continuous_q(EnvsContinuous.pendulum)
+    # run_and_train(env_run, env_disp, agent, run_length=EnvsContinuous.pendulum.value.run_length, seed_runs=10,
+    #               timeout=False, debug_viz=False)
+
+    # walker + continuous DQN
+    env_run, env_disp, agent = build_continuous_q(EnvsContinuous.bi_walker, embed_dim=8, layer_sizes=[256, 128],
+                                                  tau=.05, sigma=0.6, theta=0.45)
+    run_and_train(env_run, env_disp, agent, run_length=EnvsContinuous.bi_walker.value.run_length, seed_runs=10,
                   timeout=False, debug_viz=False)
 
     env_run.close()

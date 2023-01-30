@@ -43,10 +43,13 @@ class EnvsDiscrete(Enum):
 
 class EnvsContinuous(Enum):
     pendulum = EnvConfigCont('Pendulum-v1', {}, [(-2., 2.)],
-                         3, 500)
+                         3, 250)
     lunar_continuous = EnvConfigCont("LunarLander-v2", {"continuous": True},
                                   [(-1., 1.), (-1., 1.)],
                                   8, 1000)
+    bi_walker = EnvConfigCont("BipedalWalker-v3", {},
+                              [(-1., 1.), (-1., 1.), (-1., 1.), (-1., 1.)],
+                              24, 1600)
 
 
 def _build_env(env: Union[EnvConfig, EnvConfigCont]):
@@ -136,7 +139,7 @@ def build_continuous_q(env: EnvsContinuous,
                        drop_rate: float = 0.05,
                        gamma: float = 0.99,
                        num_batch_sample: int = 1,
-                       tau: float = 0.05,
+                       tau: float = 0.01,
                        train_epoch: int = 1,
                        batch_size: int = 64,
                        sigma: float = 0.2,
@@ -151,18 +154,21 @@ def build_continuous_q(env: EnvsContinuous,
     def build_q():
         return DenseScalar(embed_dims, layer_sizes, drop_rate)
     def build_pi():
-        return DenseScalarPi(action_bounds, embed_dims, layer_sizes, drop_rate)
+        return DenseScalarPi(len(action_bounds), embed_dims, layer_sizes, drop_rate,
+                             bounds=action_bounds)
     run_iface = RunIfaceCont(action_bounds,
                              [theta] * len(action_bounds),
                              [sigma] * len(action_bounds),
                              rng)
+    # NOTE/Observation: really hard to balance exploration and action training
+    #   tendency for pi to blow up --> no exploration possible
     Qa = QAgent_cont(run_iface, build_q, build_pi, rng,
-                        len(action_bounds),
+                        action_bounds,
                         [(env.value.dims_obs,), (1,)],
                         gamma=gamma,
                         tau=tau,
                         batch_size=batch_size,
                         num_batch_sample=num_batch_sample,
-                        train_epoch=train_epoch,
+                        train_epoch=train_epoch
                         )
     return env_run, env_disp, Qa

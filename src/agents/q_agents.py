@@ -133,6 +133,7 @@ class RunIfaceCont:
         self.mu = np.zeros((len(bounds)))
         self.cov = np.eye(len(bounds))
         self.rng = rng
+
         # initialize noise at 0
         self.x_noise = np.zeros((len(self.bounds)))
 
@@ -141,7 +142,7 @@ class RunIfaceCont:
         self.x_noise += (self.sigma * np.sqrt(2. * self.theta) *
                          self.rng.multivariate_normal(self.mu, self.cov) -
                          self.theta * self.x_noise)
-        return np.clip(x + self.x_noise, self.bounds[:, 0], self.bounds[:, 1])
+        return np.clip(x + self.x_noise, self.bounds[:,0], self.bounds[:,1])
 
     def init_action(self):
         # returns: List[float]
@@ -151,7 +152,7 @@ class RunIfaceCont:
         return self._noisify_and_clip(mid_pt).tolist()
 
     def select_action(self, model: ScalarStateModel, state: List[np.ndarray],
-                      test_mode: bool = False, debug: bool = False):
+                      debug: bool = False, test_mode: bool = False):
         """
         Args:
             model (ScalarStateModel): action selection model
@@ -166,11 +167,9 @@ class RunIfaceCont:
         state = [tf.expand_dims(si, 0) for si in state]
         # returns batch_size (1 here) x action_dims
         a = model(state)[0].numpy()
-        if test_mode:
-            a_noise = a
-        else:
-            a_noise = self._noisify_and_clip(a).tolist()
+        a_noise = self._noisify_and_clip(a).tolist()
         if debug:
+            print(self.x_noise)
             print(a)
             print(a_noise)
         return a_noise
@@ -538,7 +537,7 @@ class QAgent_cont(Agent):
                  q_model_builder: Callable[[], ScalarModel],
                  pi_model_builder: Callable[[], ScalarStateModel],
                  rng: npr.Generator,
-                 action_dims: int,
+                 action_bounds: List[Tuple[float]],
                  state_dims: List[Tuple[int]],
                  gamma: float = 0.7,
                  tau: float = 0.01,
@@ -560,11 +559,11 @@ class QAgent_cont(Agent):
                     call(state: List[tf.Tensor])
                 action generator
             rng (npr.Generator):
-            action_dims (int): number of action dimensions
+            action_bounds (List[Tuple[int]]): (lb, ub) pairs for each
+                action dimension
             state_dims (List[List[int]]): shape of each state tensor
                 Ex: if we want to supply base state + pixels -->
                     it's useful to subit them as separate state tensors
-            gamma (float): discount factor
             gamma (float): discount factor
             tau (float): update rate (often referred to as alpha in literature)
                 after training eval, eval weights are copied to selection
@@ -586,6 +585,7 @@ class QAgent_cont(Agent):
         self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
+        action_dims = len(action_bounds)
 
         # multi-state system
         s0_names = ["state" + str(i) for i in range(len(state_dims))]
@@ -710,4 +710,5 @@ class QAgent_cont(Agent):
         self.mem_buffer.append(d)
 
     def end_epoch(self):
+        self.run_iface.x_noise = self.run_iface.x_noise * 0.
         pass
