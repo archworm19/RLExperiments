@@ -93,22 +93,62 @@ def clipped_surrogate_loss(probability_ratio: tf.Tensor,
 
 def _right_conv(v: tf.Tensor,
                 k: float):
-    # v: shape = batch_size
-    v_pad = tf.concat([v, 0. * v], axis=0)
-    x = tf.concat([[1.],
-                   tf.ones(tf.shape(v)[0], dtype=v_pad.dtype) * k],
-                  axis=0)
-    f = tf.math.cumprod(x, axis=0)[:-1]
-    v_fin = tf.nn.conv1d(tf.reshape(v_pad, [1, -1, 1]),
+    # v: shape = batch_size x T
+    # return shape = batch_size x T
+    v_pad = tf.concat([v, 0. * v], axis=1)
+    f = tf.math.pow(k, tf.cast(tf.range(tf.shape(v)[1]), v.dtype))
+    v_fin = tf.nn.conv1d(tf.expand_dims(v_pad, 2),
                          tf.reshape(f, [-1, 1, 1]),
                          1,
                          "VALID",
                          data_format="NWC")
-    return v_fin[0, :-1, 0]
+    return v_fin[:, :-1, 0]
 
 
-def advantage_conv():
-    pass
+def advantage_conv(V: tf.Tensor,
+                   reward: tf.Tensor,
+                   gamma: float,
+                   lam: float):
+    """Generalized advantage calculation (convolution)
+        eqn 11 in PPO paper
+
+    Args:
+        V (tf.Tensor): value_model(state) --> V
+            shape = batch_size x T
+        reward (tf.Tensor):
+            shape = batch_size x T
+        gamma (float): discount factor
+        lam (float): generalized discount factor
+
+    Returns:
+        tf.Tensor: generalized advantage series
+            shape = batch_size x (T - 1)
+    """
+    delta = reward[:, :-1] + gamma * V[:, 1:] - V[:, :-1]
+    return _right_conv(delta, gamma * lam)
+
+
+def value_conv(V: tf.Tensor,
+               reward: tf.Tensor,
+               gamma: float):
+    """target Value calculation (convolution)
+        = r_t + gamma * r_{t+1} + ... + gamma^T * V(T)
+
+    Args:
+        V (tf.Tensor): value_model(state) --> V
+            shape = batch_size x T
+        reward (tf.Tensor):
+            shape = batch_size x T
+        gamma (float): discount factor
+
+    Returns:
+        tf.Tensor: value estimate
+            shape = batch_size x (T + 1)
+    """
+    # --> batch_size x T + 1
+    rv = tf.concat([reward, V[:, -1:]], axis=1)
+    return _right_conv(rv, gamma)
+
 
 def ppo_actor_loss(pi: ScalarStateModel,
                    pi_old: ScalarStateModel,
@@ -163,3 +203,31 @@ if __name__ == "__main__":
             g.watch(x)
             y = clipped_surrogate_loss(x, At, 0.2)
         assert tf.math.reduce_all(g.gradient(y, x) == eg)
+
+    # advantage calculation testing
+    # if lam = 1 --> should become reward sum
+    V = tf.ones([3, 20], dtype=tf.float32)
+    reward = tf.ones([3, 20], dtype=tf.float32)
+    gamma = 0.9
+    At = advantage_conv(V, reward, gamma, 1.)
+
+    for i in range(19):
+        a_i = -1. * V[0, i].numpy()
+        gfactor = 1.
+        for j in range(i, 20):
+            a_i += reward[0, j].numpy() * gfactor
+            gfactor *= gamma
+        assert tf.math.reduce_all(tf.round(At[:, i] * 100) ==
+                                  tf.round(tf.constant(a_i, tf.float32) * 100))
+
+    # value estimate?
+    val = value_conv(V, reward, gamma)
+    for i in range(21):
+        v_i = 0.
+        gfactor = 1.
+        for j in range(i, 20):
+            v_i += reward[0, j].numpy() * gfactor
+            gfactor *= gamma
+        v_i += V[0, -1].numpy() * gfactor
+        assert tf.math.reduce_all(tf.round(val[:, i] * 100) ==
+                                  tf.round(tf.constant(v_i, tf.float32) * 100))
