@@ -149,7 +149,7 @@ def value_conv(V: np.ndarray,
 # > train on summed losses
 
 
-def package_dataset(states: Dict[str, np.ndarray],
+def package_dataset(states: Dict[str, List[np.ndarray]],
                     V: List[np.ndarray],
                     reward: List[np.ndarray],
                     terminated: List[bool],
@@ -157,10 +157,34 @@ def package_dataset(states: Dict[str, np.ndarray],
                     lam: float,
                     adv_name: str = "adv",
                     val_name: str = "val"):
-    # TODO: docstring
-    # TODO: take in values / rewards
-    #       --> build the ppo dataset
+    """package dataset for ppo training actor and/or critic
 
+    Args:
+        states (Dict[str, List[np.ndarray]]): mapping from state names to
+            state vectors. Each dict entry is a different state.
+            Each list is a different trajectory.
+            states[k0][i] matches up with states[k1][i]
+        V (List[np.ndarray]): V(s_t) = critic evaluation of states
+            Each list is a different trajectory.
+            Each ndarray has shape T x ...
+        reward (List[np.ndarray]):
+            Each list is a different trajectory.
+            Each ndarray has shape T x ...
+        terminated (List[bool]): whether each trajectory
+            was terminated or is still running
+        gamma (float): discount factor
+        lam (float): generalized advantage factor
+        adv_name (str, optional): advantage field name. Defaults to "adv".
+        val_name (str, optional): value field name. Defaults to "val".
+            value = estimated reward value = r_t + gamma * r_t1 + ...
+
+    Returns:
+        tf.data.Dataset: shuffled dataset with named fields
+            fields:
+                > one for each state
+                > advantage (adv_name)
+                > value (val_name)
+    """
     advs = [advantage_conv(vi, ri, gamma, lam, termi) for vi, ri, termi in
             zip(V, reward, terminated)]
     # NOTE: last value doesn't involve reward --> no training signal
@@ -230,8 +254,7 @@ if __name__ == "__main__":
     r2 = np.ones((5,))
     terminated = [False, True]
     dset = package_dataset({"s": [s1, s2]}, [v1, v2], [r1, r2], terminated, 0.9, 1.)
-    for v in dset.batch(1):
+    for v in dset.batch(4):
         print(v)
-        input("cont?")
 
 
