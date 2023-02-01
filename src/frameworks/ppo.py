@@ -3,7 +3,8 @@
         Schulman et al, 2017
 """
 import tensorflow as tf
-from typing import List
+import numpy as np
+from typing import List, Dict
 from frameworks.layer_signatures import ScalarStateModel
 
 # TODO
@@ -54,138 +55,125 @@ def clipped_surrogate_loss(probability_ratio: tf.Tensor,
     return tf.math.reduce_min(r2 * tf.expand_dims(advantage, 1), axis=1)
 
 
-# TODO: calculate advantage separately?
-
-# TODO: I'm missing some stuff
-# 1. pi needs a distribution
-#   > in the paper, actor model outputs --> mean of gaussian distro (with variable variance)
-#   ez to sample from
-#   calculate pi using the gaussian formulation ~ ratio of 2 gaussians?
-# 2. transform sequences to samples?
-#   A_t = series
-#   if collect N sequences of length T for given episode segment
-#   Oh! I think I get it now ~
-#       run for T timesteps --> calc advantage / value estimate --> no train
-#   ... after a certain number of collection runs --> optimize
-#   ... hmmm... that doesn't seem to be the case for algorithm 1
-#
-#   2 corrected:
-#       look back at advantage function + consider A_T
-#       A_T = V(S_T)
-#       --> so, we do calculate advantage in a CONVOLUTION
-#       ... presumably value_target is calculated in a convolution as well
-#
-#
-# TODO: how to do convolution?
-#   input data = batch_size x T
-#   > something like convolution with step function (0 to gamma * lambda)
-#   one system: pad sequence right with 0s + use constant filter of gamma * lambda
-
-
-# TODO: who uses this right_conv?
-# > advantage
-#       v = delta
-#       k = gamma * lambda
-#
-# > value
-#       v = concat(reward, V from final step)
-#       k = gamma
-
-def _right_conv(v: tf.Tensor,
+def _right_conv(v: np.ndarray,
                 k: float):
-    # v: shape = batch_size x T
-    # return shape = batch_size x T
-    v_pad = tf.concat([v, 0. * v], axis=1)
-    f = tf.math.pow(k, tf.cast(tf.range(tf.shape(v)[1]), v.dtype))
-    v_fin = tf.nn.conv1d(tf.expand_dims(v_pad, 2),
-                         tf.reshape(f, [-1, 1, 1]),
-                         1,
-                         "VALID",
-                         data_format="NWC")
-    return v_fin[:, :-1, 0]
+    # v: shape = T
+    # return shape = T
+    v_pad = np.concatenate((v, 0. * v), axis=0)
+    f = k ** np.arange(np.shape(v)[0])
+    return np.convolve(v_pad, f[::-1], mode="valid")[:-1]
 
 
-def advantage_conv(V: tf.Tensor,
-                   reward: tf.Tensor,
+def advantage_conv(V: np.ndarray,
+                   reward: np.ndarray,
                    gamma: float,
-                   lam: float):
+                   lam: float,
+                   terminated: bool = False):
     """Generalized advantage calculation (convolution)
         eqn 11 in PPO paper
 
     Args:
-        V (tf.Tensor): value_model(state) --> V
-            shape = batch_size x T
-        reward (tf.Tensor):
-            shape = batch_size x T
+        V (np.ndarray): value_model(state) --> V
+            shape = T
+        reward (np.ndarray):
+            shape = T
         gamma (float): discount factor
         lam (float): generalized discount factor
+        terminated (bool): set to true if sequence
+            terminates (assumed to terminate at end of seq)
+            V(s_{T+1}) = 0
 
     Returns:
-        tf.Tensor: generalized advantage series
-            shape = batch_size x (T - 1)
+        np.ndarray: generalized advantage series
+            shape = (T - 1)
     """
-    delta = reward[:, :-1] + gamma * V[:, 1:] - V[:, :-1]
+    delta = reward[:-1] + gamma * V[1:] - V[:-1]
+    if terminated:
+        delta[-1] = reward[-2] - V[-2]
     return _right_conv(delta, gamma * lam)
 
 
-def value_conv(V: tf.Tensor,
-               reward: tf.Tensor,
-               gamma: float):
+def value_conv(V: np.ndarray,
+               reward: np.ndarray,
+               gamma: float,
+               terminated: bool = False):
     """target Value calculation (convolution)
-        = r_t + gamma * r_{t+1} + ... + gamma^T * V(T)
+        = r_t + gamma * r_{t+1} + gamma^2 * r_{t+1} + ...
+        later timesteps will involve fewer reward values
+    
+        sequence assumption:
+            s_t + a_t --> r_t, s_{t+1}
+            so, since we want to use V(s_T) as proxy for
+                rewards following reward ndarray -->
+            replace last reward with V[-1]
+                or 0 if terminated sequence
 
     Args:
-        V (tf.Tensor): value_model(state) --> V
-            shape = batch_size x T
-        reward (tf.Tensor):
-            shape = batch_size x T
+        V (np.ndarray): value_model(state) --> V
+            shape = T
+        reward (np.ndarray):
+            shape = T
         gamma (float): discount factor
+        terminated (bool): set to true if sequence
+            terminates (assumed to terminate at end of seq)
+            V(s_{T+1}) = 0
 
     Returns:
-        tf.Tensor: value estimate
-            shape = batch_size x (T + 1)
+        np.ndarray: value estimate
+            shape = T
     """
-    # --> batch_size x T + 1
-    rv = tf.concat([reward, V[:, -1:]], axis=1)
+    if terminated:
+        rv = np.concatenate((reward[:-1], [0.]), axis=0)
+    else:
+        rv = np.concatenate((reward[:-1], V[-1:]), axis=0)
     return _right_conv(rv, gamma)
 
 
-def ppo_actor_loss(pi: ScalarStateModel,
-                   pi_old: ScalarStateModel,
-                   value_model: ScalarStateModel,
-                   states: List[tf.Tensor],
-                   reward: tf.Tensor,
-                   gamma: float,
-                   lam: float):
-    # TODO: this is totally wrong!
-    """PPO actor loss
-        L^{LKPEN}(theta) = eqn 8 from PPO paper
+# TODO: there are separate datasets!
+# analysis of gradients
+# > L_VF only involves V(s_t) = critic model
+# > L_CLIP involves critic model V(s_t) and
+#       actor model pi
+#       ... tho, I suppose you could freeze critic for this
+#       YES!!! V(s_t) should be frozen for this error
+#       ... should probably be handled through stop_gradient... might still want single dataset!
+#
+# background seq: s_t + a_t --> r_t, s_{t+1}
+#
+# Option 1: single dataset ~ yeah, this is the way
+# > lop off extra value (that's fine; this is just V(s) / no reward anyway)
+# > > concat all sequences
+# > > shuffle
+# > > batch
+# > each sample = s_t, value_t, advantage_t
+# > train on summed losses
 
 
-    Args:
-        pi (ScalarStateModel): new model
-        pi_old (ScalarStateModel): old actor model
-        value_model (ScalarStateModel):
-        states (List[tf.Tensor]):
-            each tensor has shape batch_size x T x ...
-        reward (tf.Tensor):
-            shape = batch_size x T
-        gamma (float): discount factor
-        lam (float): discount factor for generalized advantage function
-    """
-    # t_i = tf.ones([T], dtype=reward.dtype)
+def package_dataset(states: Dict[str, np.ndarray],
+                    V: List[np.ndarray],
+                    reward: List[np.ndarray],
+                    terminated: List[bool],
+                    gamma: float,
+                    lam: float,
+                    adv_name: str = "adv",
+                    val_name: str = "val"):
+    # TODO: docstring
+    # TODO: take in values / rewards
+    #       --> build the ppo dataset
 
-    # unpack states
-    states_t = [si[:-1] for si in states]
-    states_t1 = [si[1:] for si in states]
+    advs = [advantage_conv(vi, ri, gamma, lam, termi) for vi, ri, termi in
+            zip(V, reward, terminated)]
+    # NOTE: last value doesn't involve reward --> no training signal
+    vals = [value_conv(vi, ri, gamma, termi)[:-1] for vi, ri, termi in
+            zip(V, reward, terminated)]
 
-    # advantage diffs
-    #   = r_t + gamma * V(s_{t+1}) - V(s_t)
-    adv_diffs = reward[:-1] + gamma * value_model(states_t1) - value_model(states_t)
-    # generalized advantage
-    #   = adv_diff(0) + (gamma * lam) * adv_diff(1) + ... + (gamma * lam)^(T - 1) * adv_diff(T)
-    gen_adv = tf.cum_prod(t_i * gamma * lam)
-    pass
+    # package into dataset
+    d = {k: np.concatenate([ski[:-1] for ski in states[k]], axis=0)
+         for k in states}
+    d[adv_name] = np.concatenate(advs, axis=0)
+    d[val_name] = np.concatenate(vals, axis=0)
+    dset = tf.data.Dataset.from_tensor_slices(d)
+    return dset.shuffle(np.shape(d[adv_name])[0])
 
 
 if __name__ == "__main__":
@@ -206,28 +194,44 @@ if __name__ == "__main__":
 
     # advantage calculation testing
     # if lam = 1 --> should become reward sum
-    V = tf.ones([3, 20], dtype=tf.float32)
-    reward = tf.ones([3, 20], dtype=tf.float32)
+    V = np.ones((20,))
+    reward = np.ones((20,))
     gamma = 0.9
     At = advantage_conv(V, reward, gamma, 1.)
 
     for i in range(19):
-        a_i = -1. * V[0, i].numpy()
+        a_i = -1. * V[i]
         gfactor = 1.
         for j in range(i, 20):
-            a_i += reward[0, j].numpy() * gfactor
+            a_i += reward[j] * gfactor
             gfactor *= gamma
-        assert tf.math.reduce_all(tf.round(At[:, i] * 100) ==
-                                  tf.round(tf.constant(a_i, tf.float32) * 100))
+        assert np.round(a_i, 4) == np.round(At[i], 4)
 
     # value estimate?
     val = value_conv(V, reward, gamma)
-    for i in range(21):
+    for i in range(20):
         v_i = 0.
         gfactor = 1.
-        for j in range(i, 20):
-            v_i += reward[0, j].numpy() * gfactor
+        for j in range(i, 19):
+            v_i += reward[j] * gfactor
             gfactor *= gamma
-        v_i += V[0, -1].numpy() * gfactor
-        assert tf.math.reduce_all(tf.round(val[:, i] * 100) ==
-                                  tf.round(tf.constant(v_i, tf.float32) * 100))
+        v_i += V[-1] * gfactor
+        assert np.round(v_i, 4) == np.round(val[i], 4)
+
+    # TODO: termination tests
+
+    # package dset:
+    # test with 2 sequences of different lengths
+    s1 = np.zeros((10, 2))
+    s2 = np.zeros((5, 2))
+    v1 = np.ones((10,))
+    v2 = np.ones((5,))
+    r1 = np.ones((10,))
+    r2 = np.ones((5,))
+    terminated = [False, True]
+    dset = package_dataset({"s": [s1, s2]}, [v1, v2], [r1, r2], terminated, 0.9, 1.)
+    for v in dset.batch(1):
+        print(v)
+        input("cont?")
+
+
