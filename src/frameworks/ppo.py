@@ -5,29 +5,7 @@
 import tensorflow as tf
 import numpy as np
 from typing import List, Dict
-from frameworks.layer_signatures import ScalarStateModel
-
-# TODO
-# > clipped surrogate objective ~ eqn 7 DONE
-#       no model;
-#       just take in
-#           r ~ probability ratio
-#           A ~ advantage estimate
-#           eta
-# > sample average KL estimate (doesn't need own function)
-#       between old policy and new
-# > value target calculation; TODO: should we just use following formulation?
-#       scipy.signal.lfilter
-# > value target calculation + fixed T
-#       use lfilter for T steps + value estimate for end
-#       NOTE: this should probably just replace previous
-# > generalized advantage calculation + fixed T
-#       eqn 11
-#       NOTE: definitely stop gradient through v (this is used for policy update)
-# > higher order function ~ do all of the work given agents
-# > TODO: parallelization system?
-#       as far as I understand --> single valuation network + N parallel actors
-#       ... could probably use 1 actor with stochasticity as well...
+from frameworks.layer_signatures import ScalarStateModel, ScalarModel
 
 
 def clipped_surrogate_loss(probability_ratio: tf.Tensor,
@@ -157,7 +135,11 @@ def package_dataset(states: Dict[str, List[np.ndarray]],
                     lam: float,
                     adv_name: str = "adv",
                     val_name: str = "val"):
+    # TODO: pretty sure dataset will need actions
     """package dataset for ppo training actor and/or critic
+
+        Assumed ordering: s_t + a_t --> r_t, s_{t+1}
+        so, 0th element of each array = function of state s0
 
     Args:
         states (Dict[str, List[np.ndarray]]): mapping from state names to
@@ -198,6 +180,143 @@ def package_dataset(states: Dict[str, List[np.ndarray]],
     d[val_name] = np.concatenate(vals, axis=0)
     dset = tf.data.Dataset.from_tensor_slices(d)
     return dset.shuffle(np.shape(d[adv_name])[0])
+
+
+def critic_loss(critic: ScalarStateModel,
+                states: List[tf.Tensor],
+                value_target: tf.Tensor):
+    """(V_{theta}(s_t) - V_t^{targ})^2
+
+    Args:
+        critic (ScalarStateModel): critic model
+        states (List[tf.Tensor]):
+        value_target (tf.Tensor): value target
+            = r_t + gamma * r_t1 + gamma^2 * r_t2 + ...
+            shape = batch_size
+
+    Returns:
+        tf.Tensor: error for each batch sample
+            shape = batch_size
+    """
+    # --> shape = batch_size
+    value_pred = critic(states)
+    return tf.math.pow(value_pred - value_target, 2.)
+
+
+# TODO: what form of kldiv?
+# > it is a function of given state
+# Take gaussian pis as example -->
+# > given s_t --> we get a gaussians for each pi
+#             --> this must be the analytical KL-div
+#                   of these gaussians (hence the *)
+# ...
+# what's the alternative? you calculate kl for specific
+#   action taken... this doesn't make sense cuz
+#   kldiv is a function of 2 distributions
+#
+#
+# Bounded gaussian thoughts
+# > og paper: tanh(network) --> mean; I think they had a single variable/vector for variance
+# > this makes kldiv ez to calculate but requires further clipping by env
+#           ... that's fine but could lead to some sampling weirdness, idk
+#
+# loss design?
+# Idea 1: separate out all of the different losses --> agent combines them
+# > critic loss stays the same ~ needs ScalarStateModel
+# > actor loss (sans kl div) ~ needs 2 SclaraModel(s)
+# > kldiv gaussians ~ needs 2 mus, 2 vars
+# > kldiv multiclass ~ needs softmaxed vectors (for discrete action spaces)
+# ... is that it?
+
+
+# Alternative design: make integration functions for gaussian vs. softmaxed
+# ... maybe still rely on agent to combine losses!
+# > critic loss can remain
+# > gaussian / continuous
+# > > kldiv_gauss(mu1, var1, mu2, var2, ...)
+# > > clip_loss_gauss(s_t, a_t, mu1, var1, mu2, var2) ~ left half of L^KLPEN
+# > > ???
+# > multiclass / discrete
+# > > kldiv_multiclass(pr1, pr2) ~ softmaxed vectors DONE
+# > > clip_loss_multiclass(s_t, a_t, pr1, pr2) DONE
+
+
+def actor_loss_kldiv_multiclass(p: tf.Tensor, q: tf.Tensor):
+    """kldiv between two multiclass probability distributions
+        = kl_div(p || q)
+        = sum_{x} [P(x) * (log P(x) - log Q(x))]
+
+    Args:
+        p (tf.Tensor): probability distro 1 = pi_{old}(* | s_t)
+            batch_size x num_actions
+        q (tf.Tensor): probability distro 2 = pi_{theta}(* | s_t)
+            batch_size x num_actions
+
+    Returns:
+        tf.Tensor: multiclass kl divergence for each sample
+            shape = batch_size
+    """
+    return tf.math.reduce_sum(p * (tf.math.log(p) - tf.math.log(q)), axis=1)
+
+
+def actor_loss_multiclass(p: tf.Tensor, q: tf.Tensor,
+                          actions: tf.Tensor,
+                          advantage: tf.Tensor):
+    """actor loss for multiclass distros
+        = left side of L^KLPEN(theta) from PPO paper
+        = E_{t} [ pi(a_t | s_t) / pi_old(a_t | s_t) A_t
+    for multiclass:
+            pi_{theta}(a_t | s_t) = q dot actions
+
+    Args:
+        p (tf.Tensor): probability distro 1 = pi_{old}(* | s_t)
+            batch_size x num_actions
+        q (tf.Tensor): probability distro 2 = pi_{theta}(* | s_t)
+            batch_size x num_actions
+        actions (tf.Tensor): multiclass action probabilities
+            represented as one-hot vectors
+            = batch_size x num_actions
+        advantage (tf.Tensor): advantage calculated for pi_old/q
+            shape = batch_size
+
+    Returns:
+        tf.Tensor: scaled advantage calculation
+            shape = batch_size
+    """
+    pi_new = tf.math.reduce_sum(q * actions, axis=1)
+    pi_old = tf.math.reduce_sum(p * actions, axis=1)
+    return tf.math.divide(pi_new, pi_old) * advantage
+
+
+# TODO: should I write KLPEN wrappers to make things
+#   simpler for agent? probs ~ yeah, will avoid ordering errors!
+
+
+
+def actor_loss(actor: ScalarModel,
+               actor_old: ScalarModel,
+               states: List[tf.Tensor],
+               actions: tf.Tensor,
+               advantage: tf.Tensor,
+               beta: float):
+    """actor loss
+        = L^KLPEN(theta) in PPO paper
+        = E_{t} [ pi(a_t | s_t) / pi_old(a_t | s_t) A_t -
+                 beta * KL[pi_old(* | s_t) || pi(* | s_t)]]
+        pi = actor; pi_old = old/fixed actor
+
+    Args:
+        actor (ScalarModel): actor model
+        actor_old (ScalarModel): fixed/old actor
+            these models should evaluate the probability
+            of selecting an action given a state
+        states (List[tf.Tensor]):
+        actions (tf.Tensor):
+        advantage (tf.Tensor): estimated advantage
+            see advantage_conv
+        beta (float): KL div penalty factor
+    """
+    pass
 
 
 if __name__ == "__main__":
