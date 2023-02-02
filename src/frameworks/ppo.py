@@ -5,7 +5,6 @@
 import tensorflow as tf
 import numpy as np
 from typing import List, Dict
-from frameworks.layer_signatures import ScalarStateModel, ScalarModel
 
 
 def clipped_surrogate_loss(probability_ratio: tf.Tensor,
@@ -54,7 +53,7 @@ def advantage_conv(V: np.ndarray,
         V (np.ndarray): value_model(state) --> V
             shape = T
         reward (np.ndarray):
-            shape = T
+            shape = T - 1
         gamma (float): discount factor
         lam (float): generalized discount factor
         terminated (bool): set to true if sequence
@@ -65,9 +64,9 @@ def advantage_conv(V: np.ndarray,
         np.ndarray: generalized advantage series
             shape = (T - 1)
     """
-    delta = reward[:-1] + gamma * V[1:] - V[:-1]
+    delta = reward + gamma * V[1:] - V[:-1]
     if terminated:
-        delta[-1] = reward[-2] - V[-2]
+        delta[-1] = reward[-1] - V[-2]
     return _right_conv(delta, gamma * lam)
 
 
@@ -90,7 +89,7 @@ def value_conv(V: np.ndarray,
         V (np.ndarray): value_model(state) --> V
             shape = T
         reward (np.ndarray):
-            shape = T
+            shape = T - 1
         gamma (float): discount factor
         terminated (bool): set to true if sequence
             terminates (assumed to terminate at end of seq)
@@ -101,41 +100,22 @@ def value_conv(V: np.ndarray,
             shape = T
     """
     if terminated:
-        rv = np.concatenate((reward[:-1], [0.]), axis=0)
+        rv = np.concatenate((reward, [0.]), axis=0)
     else:
-        rv = np.concatenate((reward[:-1], V[-1:]), axis=0)
+        rv = np.concatenate((reward, V[-1:]), axis=0)
     return _right_conv(rv, gamma)
-
-
-# TODO: there are separate datasets!
-# analysis of gradients
-# > L_VF only involves V(s_t) = critic model
-# > L_CLIP involves critic model V(s_t) and
-#       actor model pi
-#       ... tho, I suppose you could freeze critic for this
-#       YES!!! V(s_t) should be frozen for this error
-#       ... should probably be handled through stop_gradient... might still want single dataset!
-#
-# background seq: s_t + a_t --> r_t, s_{t+1}
-#
-# Option 1: single dataset ~ yeah, this is the way
-# > lop off extra value (that's fine; this is just V(s) / no reward anyway)
-# > > concat all sequences
-# > > shuffle
-# > > batch
-# > each sample = s_t, value_t, advantage_t
-# > train on summed losses
 
 
 def package_dataset(states: Dict[str, List[np.ndarray]],
                     V: List[np.ndarray],
                     reward: List[np.ndarray],
+                    actions: List[np.ndarray],
                     terminated: List[bool],
                     gamma: float,
                     lam: float,
                     adv_name: str = "adv",
-                    val_name: str = "val"):
-    # TODO: pretty sure dataset will need actions
+                    val_name: str = "val",
+                    action_name: str = "action"):
     """package dataset for ppo training actor and/or critic
 
         Assumed ordering: s_t + a_t --> r_t, s_{t+1}
@@ -152,6 +132,8 @@ def package_dataset(states: Dict[str, List[np.ndarray]],
         reward (List[np.ndarray]):
             Each list is a different trajectory.
             Each ndarray has shape T x ...
+        actions (List[np.ndarray]): where len of each state
+            trajectory is T --> len of reward/action trajectory = T-1
         terminated (List[bool]): whether each trajectory
             was terminated or is still running
         gamma (float): discount factor
@@ -166,157 +148,128 @@ def package_dataset(states: Dict[str, List[np.ndarray]],
                 > one for each state
                 > advantage (adv_name)
                 > value (val_name)
+                > actions (action_name)
     """
     advs = [advantage_conv(vi, ri, gamma, lam, termi) for vi, ri, termi in
             zip(V, reward, terminated)]
-    # NOTE: last value doesn't involve reward --> no training signal
+    # NOTE: last value term = V(s_T) ~ no training signal there --> lop it off
     vals = [value_conv(vi, ri, gamma, termi)[:-1] for vi, ri, termi in
             zip(V, reward, terminated)]
 
     # package into dataset
     d = {k: np.concatenate([ski[:-1] for ski in states[k]], axis=0)
          for k in states}
+    d[action_name] = np.concatenate(actions, axis=0)
     d[adv_name] = np.concatenate(advs, axis=0)
     d[val_name] = np.concatenate(vals, axis=0)
     dset = tf.data.Dataset.from_tensor_slices(d)
     return dset.shuffle(np.shape(d[adv_name])[0])
 
 
-def critic_loss(critic: ScalarStateModel,
-                states: List[tf.Tensor],
-                value_target: tf.Tensor):
-    """(V_{theta}(s_t) - V_t^{targ})^2
+def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
+                        critic_pred: tf.Tensor,
+                        action: tf.Tensor,
+                        advantage: tf.Tensor,
+                        value_target: tf.Tensor,
+                        eta: float,
+                        vf_scale: float = 1.):
+    # TODO: entropy term?
+    """ppo loss for multiclass distribution actors
+        = L^CLIP + L^VF from ppo paper for actor error
+            as well as critic error (V(s_t) - V_targ)^2
+
+        NOTE: this loss trains actor and critic simultaneously
+        NOTE: using fixed advantage --> actor is trained on
+            old value model
 
     Args:
-        critic (ScalarStateModel): critic model
-        states (List[tf.Tensor]):
-        value_target (tf.Tensor): value target
-            = r_t + gamma * r_t1 + gamma^2 * r_t2 + ...
+        pi_old (tf.Tensor): 
+        pi_new (tf.Tensor):
+            old and new probability distros (softmaxed)
+            output by actor models
+            shape = batch_size x num_actions
+        critic_pred (tf.Tensor):
+            critic prediction ~ should approximate value calc
             shape = batch_size
-
-    Returns:
-        tf.Tensor: error for each batch sample
-            shape = batch_size
-    """
-    # --> shape = batch_size
-    value_pred = critic(states)
-    return tf.math.pow(value_pred - value_target, 2.)
-
-
-# TODO: what form of kldiv?
-# > it is a function of given state
-# Take gaussian pis as example -->
-# > given s_t --> we get a gaussians for each pi
-#             --> this must be the analytical KL-div
-#                   of these gaussians (hence the *)
-# ...
-# what's the alternative? you calculate kl for specific
-#   action taken... this doesn't make sense cuz
-#   kldiv is a function of 2 distributions
-#
-#
-# Bounded gaussian thoughts
-# > og paper: tanh(network) --> mean; I think they had a single variable/vector for variance
-# > this makes kldiv ez to calculate but requires further clipping by env
-#           ... that's fine but could lead to some sampling weirdness, idk
-#
-# loss design?
-# Idea 1: separate out all of the different losses --> agent combines them
-# > critic loss stays the same ~ needs ScalarStateModel
-# > actor loss (sans kl div) ~ needs 2 SclaraModel(s)
-# > kldiv gaussians ~ needs 2 mus, 2 vars
-# > kldiv multiclass ~ needs softmaxed vectors (for discrete action spaces)
-# ... is that it?
-
-
-# Alternative design: make integration functions for gaussian vs. softmaxed
-# ... maybe still rely on agent to combine losses!
-# > critic loss can remain
-# > gaussian / continuous
-# > > kldiv_gauss(mu1, var1, mu2, var2, ...)
-# > > clip_loss_gauss(s_t, a_t, mu1, var1, mu2, var2) ~ left half of L^KLPEN
-# > > ???
-# > multiclass / discrete
-# > > kldiv_multiclass(pr1, pr2) ~ softmaxed vectors DONE
-# > > clip_loss_multiclass(s_t, a_t, pr1, pr2) DONE
-
-
-def actor_loss_kldiv_multiclass(p: tf.Tensor, q: tf.Tensor):
-    """kldiv between two multiclass probability distributions
-        = kl_div(p || q)
-        = sum_{x} [P(x) * (log P(x) - log Q(x))]
-
-    Args:
-        p (tf.Tensor): probability distro 1 = pi_{old}(* | s_t)
-            batch_size x num_actions
-        q (tf.Tensor): probability distro 2 = pi_{theta}(* | s_t)
-            batch_size x num_actions
-
-    Returns:
-        tf.Tensor: multiclass kl divergence for each sample
-            shape = batch_size
-    """
-    return tf.math.reduce_sum(p * (tf.math.log(p) - tf.math.log(q)), axis=1)
-
-
-def actor_loss_multiclass(p: tf.Tensor, q: tf.Tensor,
-                          actions: tf.Tensor,
-                          advantage: tf.Tensor):
-    """actor loss for multiclass distros
-        = left side of L^KLPEN(theta) from PPO paper
-        = E_{t} [ pi(a_t | s_t) / pi_old(a_t | s_t) A_t
-    for multiclass:
-            pi_{theta}(a_t | s_t) = q dot actions
-
-    Args:
-        p (tf.Tensor): probability distro 1 = pi_{old}(* | s_t)
-            batch_size x num_actions
-        q (tf.Tensor): probability distro 2 = pi_{theta}(* | s_t)
-            batch_size x num_actions
-        actions (tf.Tensor): multiclass action probabilities
-            represented as one-hot vectors
-            = batch_size x num_actions
-        advantage (tf.Tensor): advantage calculated for pi_old/q
-            shape = batch_size
-
-    Returns:
-        tf.Tensor: scaled advantage calculation
-            shape = batch_size
-    """
-    pi_new = tf.math.reduce_sum(q * actions, axis=1)
-    pi_old = tf.math.reduce_sum(p * actions, axis=1)
-    return tf.math.divide(pi_new, pi_old) * advantage
-
-
-# TODO: should I write KLPEN wrappers to make things
-#   simpler for agent? probs ~ yeah, will avoid ordering errors!
-
-
-
-def actor_loss(actor: ScalarModel,
-               actor_old: ScalarModel,
-               states: List[tf.Tensor],
-               actions: tf.Tensor,
-               advantage: tf.Tensor,
-               beta: float):
-    """actor loss
-        = L^KLPEN(theta) in PPO paper
-        = E_{t} [ pi(a_t | s_t) / pi_old(a_t | s_t) A_t -
-                 beta * KL[pi_old(* | s_t) || pi(* | s_t)]]
-        pi = actor; pi_old = old/fixed actor
-
-    Args:
-        actor (ScalarModel): actor model
-        actor_old (ScalarModel): fixed/old actor
-            these models should evaluate the probability
-            of selecting an action given a state
-        states (List[tf.Tensor]):
-        actions (tf.Tensor):
+        action (tf.Tensor): one-hot actions
+            shape = batch_size x num_actions
         advantage (tf.Tensor): estimated advantage
-            see advantage_conv
-        beta (float): KL div penalty factor
+            shape = batch_size
+        value_target (tf.Tensor): critic target
+            shape = batch_size
+        eta (float): allowable step size; used by clipped surrogate
+        vf_scale (float): scale on L^VF term
+            c1 from 
     """
-    pass
+    prob_old = tf.stop_gradient(pi_old_distro * action)
+    prob_new = pi_new_distro * action
+    prob_ratio = tf.math.divide(prob_new, prob_old)
+    l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
+    l_vf = tf.math.pow(critic_pred - value_target, 2.)
+    return l_vf - vf_scale * l_clip
+
+
+def _gauss_prob_ratio(x: tf.Tensor,
+                      mu_num: tf.Tensor, prec_num: tf.Tensor,
+                      mu_denom: tf.Tensor, prec_denom: tf.Tensor):
+    # num = numerator; denom = denominator; prec=precision
+    # all shapes assumed to be batch_size x action_dims
+
+    # det(var) for diagonal = product of diagonals
+    pre_term = tf.math.sqrt(tf.math.divide(prec_num, prec_denom))
+
+    # inside the exponent
+    diff_num = x - mu_num
+    v_num = tf.math.reduce_sum(diff_num * prec_num * diff_num, axis=1)
+    diff_denom = x - mu_denom
+    v_denom = tf.math.reduce_sum(diff_denom * prec_denom * diff_denom, axis=1)
+    exp_term = tf.math.exp(-0.5 * (v_num - v_denom))
+
+    return pre_term * exp_term
+
+
+def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
+                   pi_new_mu: tf.Tensor, pi_new_precision: tf.Tensor,
+                   critic_pred: tf.Tensor,
+                   action: tf.Tensor,
+                   advantage: tf.Tensor,
+                   value_target: tf.Tensor,
+                   eta: float,
+                   vf_scale: float = 1.):
+    """ppo loss for gaussian distribution actors
+        = L^CLIP + L^VF from ppo paper for actor error
+            as well as critic error (V(s_t) - V_targ)^2
+
+        NOTE: this loss trains actor and critic simultaneously
+        NOTE: using fixed advantage --> actor is trained on
+            old value model
+
+    Args:
+        pi_old_mu (tf.Tensor): mean outputs by old actor
+            shape = batch_size x action_dims
+        pi_old_precision (tf.Tensor): 1/variance output by old actor
+            shape = batch_size x action_dims = diagonal covar
+        pi_new_mu (tf.Tensor):
+        pi_new_precision (tf.Tensor):
+        critic_pred (tf.Tensor):
+            critic prediction ~ should approximate value calc
+            shape = batch_size
+        action (tf.Tensor): one-hot actions
+            shape = batch_size x num_actions
+        advantage (tf.Tensor): estimated advantage
+            shape = batch_size
+        value_target (tf.Tensor): critic target
+            shape = batch_size
+        eta (float): allowable step size; used by clipped surrogate
+        vf_scale (float): scale on L^VF term
+            c1 from 
+    """
+    prob_ratio = _gauss_prob_ratio(action,
+                                 pi_new_mu, pi_new_precision,
+                                 pi_old_mu, pi_old_precision)
+    l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
+    l_vf = tf.math.pow(critic_pred - value_target, 2.)
+    return l_vf - vf_scale * l_clip
 
 
 if __name__ == "__main__":
@@ -338,16 +291,17 @@ if __name__ == "__main__":
     # advantage calculation testing
     # if lam = 1 --> should become reward sum
     V = np.ones((20,))
-    reward = np.ones((20,))
+    reward = np.ones((19,))
     gamma = 0.9
     At = advantage_conv(V, reward, gamma, 1.)
 
     for i in range(19):
         a_i = -1. * V[i]
         gfactor = 1.
-        for j in range(i, 20):
+        for j in range(i, 19):
             a_i += reward[j] * gfactor
             gfactor *= gamma
+        a_i += gfactor * V[-1]
         assert np.round(a_i, 4) == np.round(At[i], 4)
 
     # value estimate?
@@ -365,15 +319,33 @@ if __name__ == "__main__":
 
     # package dset:
     # test with 2 sequences of different lengths
-    s1 = np.zeros((10, 2))
-    s2 = np.zeros((5, 2))
-    v1 = np.ones((10,))
-    v2 = np.ones((5,))
+    s1 = np.zeros((11, 2))
+    s2 = np.zeros((6, 2))
+    v1 = np.ones((11,))
+    v2 = np.ones((6,))
     r1 = np.ones((10,))
     r2 = np.ones((5,))
+    a1 = np.ones((10, 3))
+    a2 = np.ones((5, 3))
     terminated = [False, True]
-    dset = package_dataset({"s": [s1, s2]}, [v1, v2], [r1, r2], terminated, 0.9, 1.)
+    dset = package_dataset({"s": [s1, s2]}, [v1, v2], [r1, r2], [a1, a2], terminated, 0.9, 1.)
     for v in dset.batch(4):
         print(v)
 
-
+    # TODO: gaussian tests
+    from scipy.stats import multivariate_normal
+    # seems like multivariate_normal can figure out how to use diagonal covar
+    mu = [0.1, 0.15]
+    var = [0.5, 0.2]
+    mu2 = [0.2, 0.2]
+    var2 = [0.5, 0.2]
+    x = [[0.1, 0.1], [0.2, 0.2]]
+    ratio = multivariate_normal.pdf(x, mu, var) / multivariate_normal.pdf(x, mu2, var2)
+    print(ratio)
+    tf_ratio = _gauss_prob_ratio(tf.constant(x, dtype=tf.float32),
+                                 tf.constant(mu, dtype=tf.float32),
+                                 1. / tf.constant(var, dtype=tf.float32),
+                                 tf.constant(mu2, dtype=tf.float32),
+                                 1. / tf.constant(var2, dtype=tf.float32))
+    print(tf_ratio)
+    # TODO: gaussian looks good but could use more testing
