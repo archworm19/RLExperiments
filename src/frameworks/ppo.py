@@ -338,7 +338,7 @@ if __name__ == "__main__":
     for v in dset.batch(4):
         print(v)
 
-    # TODO: gaussian tests
+    # gaussian tests
     from scipy.stats import multivariate_normal
     import numpy.random as npr
     rng = npr.default_rng(42)
@@ -359,7 +359,7 @@ if __name__ == "__main__":
         diff = np.fabs(tf_ratio[i].numpy() - ratio)
         assert diff < .001
 
-    # TODO: ppo loss multiclass test
+    # ppo loss multiclass test
     # 3 "models"
     # > base model
     # > model that is very close to base model + improves advantage scale (should be best performance)
@@ -401,3 +401,30 @@ if __name__ == "__main__":
         losses.append(tf.math.reduce_mean(loss).numpy())
     assert losses[0] < losses[1]
     assert np.round(losses[0], 4) == np.round(losses[2], 4)
+
+
+    # ppo loss gauss
+    # repeat the multiloss tests for gaussian space
+    rng = npr.default_rng(42)
+    critic_pred = tf.zeros([8], dtype=tf.float32)
+    action = tf.constant(rng.random((8, 2)), dtype=tf.float32)
+    value_target = tf.zeros([8], dtype=tf.float32)
+    advantage = tf.constant([1., -1.] * 2 + [-1., 1.] * 2, dtype=tf.float32)
+    eta = 0.3  # step size
+    # everybody uses same precision
+    prec = tf.ones([8, 2], dtype=tf.float32)
+    # base model
+    mu_base = action + 0.25 * tf.constant(rng.random((8, 2)), dtype=tf.float32)
+    # good model ~ move mean towards action if advantage positive (away if neg)
+    mu_good = mu_base + (action - mu_base) * advantage[:, None]
+    # bad model ~ wrong direction
+    mu_bad = mu_base - (action - mu_base) * advantage[:, None]
+
+    loss_good = ppo_loss_gauss(mu_base, prec, mu_good, prec,
+                               critic_pred, action,
+                               advantage, value_target, eta)
+    loss_bad = ppo_loss_gauss(mu_base, prec, mu_bad, prec,
+                              critic_pred, action,
+                              advantage, value_target, eta)
+    assert np.shape(loss_good.numpy()) == (8,)
+    assert tf.math.reduce_mean(loss_good) < tf.math.reduce_mean(loss_bad)
