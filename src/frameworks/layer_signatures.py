@@ -63,3 +63,23 @@ class DistroModel(Layer):
                 where d = number of elements representing distribution
         """
         pass
+
+
+class DistroStateModel(Layer):
+    # distributional model
+
+    def __init__(self):
+        super(DistroStateModel, self).__init__()
+
+    def call(self, state_t: List[tf.Tensor]) -> tf.Tensor:
+        """
+        Args:
+            state_t (List[tf.Tensor]): set of states
+                each tensor is:
+                    batch_size x ...
+
+        Returns:
+            tf.Tensor: shape = batch_size x d
+                where d = number of elements representing distribution
+        """
+        pass

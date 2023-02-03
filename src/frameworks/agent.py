@@ -4,21 +4,7 @@
 """
 import numpy as np
 from abc import ABC
-from typing import List, Union
-from dataclasses import dataclass
-
-
-@dataclass
-class RunData:
-    # TODO: does anyone still use this?
-    # TODO: for larger datasets --> this will need
-    # to be changed to an interface
-    states: List
-    states_t1: List
-    # typically one-hots
-    actions: List
-    rewards: List
-    termination: List
+from typing import List, Union, Dict
 
 
 class Agent(ABC):
@@ -85,4 +71,65 @@ class Agent(ABC):
 
     def end_epoch(self):
         """Signal to agent that epoch is over"""
+        pass
+
+
+class AgentEpoch(ABC):
+    # agent that gets trained at every epoch
+    #   doesn't need to keep track of data internally
+
+    def init_action(self):
+        """Initial action agent should take
+
+        Returns:
+            Union[int, List[float]]:
+                int if discrete action space
+                List[float] if continuous
+        """
+        pass
+
+    def select_action(self, state: List[np.ndarray], test_mode: bool, debug: bool):
+        """select 
+
+        Args:
+            state (List[np.ndarray]): set of unbatched input tensors
+                each with shape:
+                    ...
+            test_mode (bool): are we in a 'test run' for the agent?
+            debug (bool): debug mode
+
+        Returns:
+            Union[int, List[float]]:
+                int if discrete action space
+                List[float] if continuous
+        """
+        pass
+
+    def train(self,
+              states: Dict[str, List[np.ndarray]],
+              V: List[np.ndarray],
+              reward: List[np.ndarray],
+              actions: List[np.ndarray],
+              terminated: List[bool],):
+        """train agent on data trajectories
+
+        Args:
+            states (Dict[str, List[np.ndarray]]): mapping from state names to
+                state vectors. Each dict entry is a different state.
+                Each list is a different trajectory.
+                states[k0][i] matches up with states[k1][i]
+            V (List[np.ndarray]): V(s_t) = critic evaluation of states
+                Each list is a different trajectory.
+                Each ndarray has shape T x ...
+            reward (List[np.ndarray]):
+                Each list is a different trajectory.
+                Each ndarray has shape T x ...
+            actions (List[np.ndarray]): where len of each state
+                trajectory is T --> len of reward/action trajectory = T-1
+            terminated (List[bool]): whether each trajectory
+                was terminated or is still running
+
+        Returns:
+            Dict: loss history
+        """
         pass

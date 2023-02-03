@@ -172,8 +172,8 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
                         advantage: tf.Tensor,
                         value_target: tf.Tensor,
                         eta: float,
-                        vf_scale: float = 1.):
-    # TODO: entropy term?
+                        vf_scale: float = 1.,
+                        entropy_scale: float = 0.):
     """ppo loss for multiclass distribution actors
         = L^CLIP + L^VF from ppo paper for actor error
             as well as critic error (V(s_t) - V_targ)^2
@@ -200,6 +200,7 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
         eta (float): allowable step size; used by clipped surrogate
         vf_scale (float): scale on L^VF term
             c1 from 
+        entropy_scale (float): c2 from ppo paper
 
     Returns:
         tf.Tensor: loss for each sample
@@ -210,7 +211,8 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
     prob_ratio = tf.math.divide(prob_new, prob_old)
     l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
-    return l_vf - vf_scale * l_clip
+    negentropy = tf.math.reduce_sum(pi_new_distro * tf.math.log(pi_new_distro), axis=1)
+    return l_vf - vf_scale * l_clip + entropy_scale * negentropy
 
 
 def _gauss_prob_ratio(x: tf.Tensor,
@@ -218,17 +220,14 @@ def _gauss_prob_ratio(x: tf.Tensor,
                       mu_denom: tf.Tensor, prec_denom: tf.Tensor):
     # num = numerator; denom = denominator; prec=precision
     # all shapes assumed to be batch_size x action_dims
-
     # det(var) for diagonal = product of diagonals
     pre_term = tf.math.sqrt(tf.math.reduce_prod(tf.math.divide(prec_num, prec_denom), axis=1))
-
     # inside the exponent
     diff_num = x - mu_num
     v_num = tf.math.reduce_sum(diff_num * prec_num * diff_num, axis=1)
     diff_denom = x - mu_denom
     v_denom = tf.math.reduce_sum(diff_denom * prec_denom * diff_denom, axis=1)
     exp_term = tf.math.exp(-0.5 * (v_num - v_denom))
-
     return pre_term * exp_term
 
 
@@ -239,10 +238,10 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
                    advantage: tf.Tensor,
                    value_target: tf.Tensor,
                    eta: float,
-                   vf_scale: float = 1.):
-    # TODO: entropy term?
+                   vf_scale: float = 1.,
+                   entropy_scale: float = 0.):
     """ppo loss for gaussian distribution actors
-        = L^CLIP + L^VF from ppo paper for actor error
+        = L^CLIP - L^VF + entropy from ppo paper for actor error
             as well as critic error (V(s_t) - V_targ)^2
 
         NOTE: this loss trains actor and critic simultaneously
@@ -267,7 +266,9 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
             shape = batch_size
         eta (float): allowable step size; used by clipped surrogate
         vf_scale (float): scale on L^VF term
-            c1 from 
+            c1 from ppo paper
+        entropy_scale (float): scale term for entropy
+            c2 from ppo paper
     """
     prob_ratio = _gauss_prob_ratio(action,
                                    pi_new_mu, pi_new_precision,
@@ -275,4 +276,7 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
                                    tf.stop_gradient(pi_old_precision))
     l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
-    return l_vf - vf_scale * l_clip
+    # entropy for gaussian with diagonal covar = k * log(det(var))
+    #       = k * log(prod(1 / prec_i)) = -k2 * sum(prec_i)
+    neg_ent = tf.math.reduce_sum(pi_new_precision, axis=1)
+    return l_vf - vf_scale * l_clip + entropy_scale * neg_ent
