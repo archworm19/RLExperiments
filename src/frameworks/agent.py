@@ -88,11 +88,12 @@ class AgentEpoch(ABC):
         """
         pass
 
-    def select_action(self, state: List[np.ndarray], test_mode: bool, debug: bool):
+    def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool):
         """select 
 
         Args:
-            state (List[np.ndarray]): set of unbatched input tensors
+            state (Dict[str, np.ndarray]]): mapping of state names to
+                set of unbatched input tensors
                 each with shape:
                     ...
             test_mode (bool): are we in a 'test run' for the agent?
@@ -106,21 +107,16 @@ class AgentEpoch(ABC):
         pass
 
     def train(self,
-              states: Dict[str, List[np.ndarray]],
-              V: List[np.ndarray],
+              states: List[List[np.ndarray]],
               reward: List[np.ndarray],
               actions: List[np.ndarray],
-              terminated: List[bool],):
+              terminated: List[bool]):
         """train agent on data trajectories
 
         Args:
-            states (Dict[str, List[np.ndarray]]): mapping from state names to
-                state vectors. Each dict entry is a different state.
-                Each list is a different trajectory.
-                states[k0][i] matches up with states[k1][i]
-            V (List[np.ndarray]): V(s_t) = critic evaluation of states
-                Each list is a different trajectory.
-                Each ndarray has shape T x ...
+            states (List[List[np.ndarray]]):
+                outer list = each distinct state
+                inner list: elements = different trajectories
             reward (List[np.ndarray]):
                 Each list is a different trajectory.
                 Each ndarray has shape T x ...
