@@ -200,9 +200,13 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
         eta (float): allowable step size; used by clipped surrogate
         vf_scale (float): scale on L^VF term
             c1 from 
+
+    Returns:
+        tf.Tensor: loss for each sample
+            shape = batch_size
     """
-    prob_old = tf.stop_gradient(pi_old_distro * action)
-    prob_new = pi_new_distro * action
+    prob_old = tf.stop_gradient(tf.math.reduce_sum(pi_old_distro * action, axis=1))
+    prob_new = tf.math.reduce_sum(pi_new_distro * action, axis=1)
     prob_ratio = tf.math.divide(prob_new, prob_old)
     l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
@@ -216,7 +220,7 @@ def _gauss_prob_ratio(x: tf.Tensor,
     # all shapes assumed to be batch_size x action_dims
 
     # det(var) for diagonal = product of diagonals
-    pre_term = tf.math.sqrt(tf.math.divide(prec_num, prec_denom))
+    pre_term = tf.math.sqrt(tf.math.reduce_prod(tf.math.divide(prec_num, prec_denom), axis=1))
 
     # inside the exponent
     diff_num = x - mu_num
@@ -236,6 +240,7 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
                    value_target: tf.Tensor,
                    eta: float,
                    vf_scale: float = 1.):
+    # TODO: entropy term?
     """ppo loss for gaussian distribution actors
         = L^CLIP + L^VF from ppo paper for actor error
             as well as critic error (V(s_t) - V_targ)^2
@@ -265,8 +270,9 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
             c1 from 
     """
     prob_ratio = _gauss_prob_ratio(action,
-                                 pi_new_mu, pi_new_precision,
-                                 pi_old_mu, pi_old_precision)
+                                   pi_new_mu, pi_new_precision,
+                                   tf.stop_gradient(pi_old_mu),
+                                   tf.stop_gradient(pi_old_precision))
     l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
     return l_vf - vf_scale * l_clip
@@ -334,18 +340,64 @@ if __name__ == "__main__":
 
     # TODO: gaussian tests
     from scipy.stats import multivariate_normal
+    import numpy.random as npr
+    rng = npr.default_rng(42)
     # seems like multivariate_normal can figure out how to use diagonal covar
-    mu = [0.1, 0.15]
-    var = [0.5, 0.2]
-    mu2 = [0.2, 0.2]
-    var2 = [0.5, 0.2]
-    x = [[0.1, 0.1], [0.2, 0.2]]
-    ratio = multivariate_normal.pdf(x, mu, var) / multivariate_normal.pdf(x, mu2, var2)
-    print(ratio)
+    N = 10
+    mu = rng.random((N, 2))
+    var = rng.random((N, 2))
+    mu2 = rng.random((N, 2))
+    var2 = rng.random((N, 2))
+    x = rng.random((N, 2))
     tf_ratio = _gauss_prob_ratio(tf.constant(x, dtype=tf.float32),
                                  tf.constant(mu, dtype=tf.float32),
                                  1. / tf.constant(var, dtype=tf.float32),
                                  tf.constant(mu2, dtype=tf.float32),
                                  1. / tf.constant(var2, dtype=tf.float32))
-    print(tf_ratio)
-    # TODO: gaussian looks good but could use more testing
+    for i in range(N):
+        ratio = multivariate_normal.pdf(x[i:i+1], mu[i], var[i]) / multivariate_normal.pdf(x[i:i+1], mu2[i], var2[i])
+        diff = np.fabs(tf_ratio[i].numpy() - ratio)
+        assert diff < .001
+
+    # TODO: ppo loss multiclass test
+    # 3 "models"
+    # > base model
+    # > model that is very close to base model + improves advantage scale (should be best performance)
+    # > model that is very far from base model + improves advantage scale (should be same as best)
+    critic_pred = tf.zeros([8], dtype=tf.float32)
+    action_np = np.zeros((8, 2))
+    action_np[:4, 0] = 1.
+    action_np[4:, 1] = 1.
+    action = tf.constant(action_np, dtype=tf.float32)
+    value_target = tf.zeros([8], dtype=tf.float32)
+    advantage = tf.constant([1., -1.] * 2 + [-1., 1.] * 2, dtype=tf.float32)
+    eta = 0.2  # step size
+    # base model
+    pi_base = tf.constant([[0.5, 0.5] for _ in range(8)], dtype=tf.float32)
+
+    # Q? when do we get clipped?
+    #   upper: x / base_prob = 1 + eta --> x_up = (1 + eta) * base_prob
+    #   lower: x / base_prob = 1 - eta --> x_low = (1 - eta) * base_prob
+    # here: base_prob = 0.5
+    x_up = (1 + eta) * 0.5
+    x_lo = (1 - eta) * 0.5
+
+    # best model
+    pi_best = tf.reshape(tf.constant([x_up, x_lo, x_lo, x_up] * 4, dtype=tf.float32), [8, 2])
+    # wrong way
+    pi_bad = 1. - pi_best
+    # should be same as best
+    pi_big = tf.reshape(tf.constant([0.99, 0.01, 0.01, 0.99] * 4, dtype=tf.float32), [8, 2])
+
+    losses = []
+    for v in [pi_best, pi_bad, pi_big]:
+        loss = ppo_loss_multiclass(pi_base, v,
+                                   critic_pred,
+                                   action,
+                                   advantage,
+                                   value_target,
+                                   eta)
+        assert np.shape(loss.numpy()) == (8,)
+        losses.append(tf.math.reduce_mean(loss).numpy())
+    assert losses[0] < losses[1]
+    assert np.round(losses[0], 4) == np.round(losses[2], 4)
