@@ -36,6 +36,7 @@ class PPODiscrete(AgentEpoch):
                  lam: float = 1.,
                  train_batch_size: int = 32,
                  train_epoch: int = 8):
+        super(PPODiscrete, self).__init__()
         # TODO: docstring (gamma = discout, lam = generalized discount adjustment)
         #       ... state_dims = mapping from state names to shapes
         # TODO: assumes model builder is already normalized (put in docstring)
@@ -91,7 +92,9 @@ class PPODiscrete(AgentEpoch):
         """
         return self.rng.integers(0, self.num_actions)
 
-    def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool):
+    def select_action(self, state: Dict[str, np.ndarray],
+                      test_mode: bool = False,
+                      debug: bool = False):
         """select 
 
         Args:
@@ -107,40 +110,42 @@ class PPODiscrete(AgentEpoch):
                 int if discrete action space
                 List[float] if continuous
         """
-        state = [si[None] for si in state]
+        # use state_names to sync order
+        state_ord = [state[k][None] for k in self.state_names]
         # --> shape = num_actions (normalized)
-        pr = self.pi_new(state)[0].numpy()
+        pr = self.pi_new(state_ord)[0].numpy()
         r = self.rng.random()
         return np.where(r <= np.cumsum(pr))[0][0]
 
-    def _calculate_v(self, states: Dict[str, List[np.ndarray]]):
+    def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
         # TODO: tf.function?
         # Returns: critic evals = List[np.ndarray]
         #               array for each trajectory
         V = []
-        # iter thru trajectories indices
-        for traj_ind in range(len(states[self._sname0])):
-            # iter thru windows within a trajectory
-            #   assumes 0th dim matches across states for each trajectory
+        # iter thru trajectories:
+        for traj in states:
             V_traj = []
-            for win_start in range(0, np.shape(states[self._sname0][traj_ind])[0], 32):
+            # iter thru windows within a trajectory:
+            for win_start in range(0, np.shape(traj[self._sname0])[0], 32):
                 # uses self.state_names to sync ordering
-                state_wins = [states[k][traj_ind][win_start:win_start+32] for k in self.state_names]
+                state_wins = [traj[k][win_start:win_start+32] for k in self.state_names]
                 V_traj.append(self.critic(state_wins).numpy())
             V.append(np.concatenate(V_traj, axis=0))
         return V
 
     def train(self,
-              states: Dict[str, List[np.ndarray]],
+              states: List[Dict[str, np.ndarray]],
               reward: List[np.ndarray],
               actions: List[np.ndarray],
               terminated: List[bool]):
         """train agent on data trajectories
 
         Args:
-            states (Dict[str, List[np.ndarray]]):
-                mapping of state names to state values
-                each list is a different trajectory/run
+            states (List[Dict[str, np.ndarray]]):
+                outer list = different trajectories
+                inner dict = mapping from state names to each
+                    state
+                all states = T x ...
             reward (List[np.ndarray]):
                 Each list is a different trajectory.
                 Each ndarray has shape T x ...
@@ -158,7 +163,7 @@ class PPODiscrete(AgentEpoch):
                                adv_name="adv", val_name="val", action_name="action")
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=0)
+                                  verbose=1)
         # copy update actor to old actor
         copy_model(self.pi_new, self.pi_old, 1.)
         return history

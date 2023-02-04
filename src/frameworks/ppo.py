@@ -106,7 +106,7 @@ def value_conv(V: np.ndarray,
     return _right_conv(rv, gamma)
 
 
-def package_dataset(states: Dict[str, List[np.ndarray]],
+def package_dataset(states: List[Dict[str, np.ndarray]],
                     V: List[np.ndarray],
                     reward: List[np.ndarray],
                     actions: List[np.ndarray],
@@ -122,13 +122,13 @@ def package_dataset(states: Dict[str, List[np.ndarray]],
         so, 0th element of each array = function of state s0
 
     Args:
-        states (Dict[str, List[np.ndarray]]): mapping from state names to
-            state vectors. Each dict entry is a different state.
-            Each list is a different trajectory.
-            states[k0][i] matches up with states[k1][i]
+        states (List[Dict[str, np.ndarray]]):
+            outer list = different trajectories
+            inner dict = mapping from state names to state values
+            Each ndarray has shape (T + 1) x ...
         V (List[np.ndarray]): V(s_t) = critic evaluation of states
             Each list is a different trajectory.
-            Each ndarray has shape T x ...
+            Each ndarray has shape (T + 1) x ...
         reward (List[np.ndarray]):
             Each list is a different trajectory.
             Each ndarray has shape T x ...
@@ -157,8 +157,9 @@ def package_dataset(states: Dict[str, List[np.ndarray]],
             zip(V, reward, terminated)]
 
     # package into dataset
-    d = {k: np.concatenate([ski[:-1] for ski in states[k]], axis=0)
-         for k in states}
+    d = {}
+    for k in states[0]:
+        d[k] = np.concatenate([st[k][:-1] for st in states])
     d[action_name] = np.concatenate(actions, axis=0)
     d[adv_name] = np.concatenate(advs, axis=0)
     d[val_name] = np.concatenate(vals, axis=0)
