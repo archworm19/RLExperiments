@@ -74,7 +74,7 @@ class TestDatasetGen(TestCase):
         a1 = np.ones((10, 3))
         a2 = np.ones((5, 3))
         terminated = [False, True]
-        dset = package_dataset({"s": [s1, s2]}, [v1, v2], [r1, r2], [a1, a2], terminated, 0.9, 1.)
+        dset = package_dataset([{"s": s1}, {"s": s2}], [v1, v2], [r1, r2], [a1, a2], terminated, 0.9, 1.)
         for v in dset.batch(4):
             self.assertTrue(tf.math.reduce_all(tf.shape(v["s"]) == tf.constant([4, 2], dtype=tf.int32)))
             self.assertTrue(tf.math.reduce_all(tf.shape(v["action"]) == tf.constant([4, 3], dtype=tf.int32)))
