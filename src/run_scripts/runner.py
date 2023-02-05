@@ -1,7 +1,51 @@
 """Running Gym Simulations"""
+from pyparsing import actions
 import gymnasium as gym
 import numpy as np
-from frameworks.agent import Agent
+import numpy.random as npr
+from typing import Union
+from frameworks.agent import Agent, AgentEpoch
+
+
+def simple_run(env: gym.Env,
+               agent: AgentEpoch,  # TODO: align agent and agent epoch interface so this function can take both
+               num_step: int,
+               rng: npr.Generator):
+    # run for num_step --> restart if necessary
+    # state-action model
+    # s_t --> model --> a_t --> env --> s_{t+1}, r_{t}
+    # returns: (lists = different trajectories)
+    #       start new trajectory upon termination
+    # TODO: what do we return?
+    action = agent.init_action()  # not saved
+    cur_state = env.step(action)[0]
+    save_states = [[cur_state]]
+    save_actions = [[]]
+    save_rewards = [[]]
+    save_terms = [False]
+    for _ in range(num_step):
+        # TODO: add other states (pixels!)
+        action = agent.select_action({"core_state": cur_state})
+        step_output = env.step(action)
+        cur_state = step_output[0]
+        reward = step_output[1]
+
+        # save data
+        save_states[-1].append(cur_state)
+        save_actions[-1].append(action)
+        save_rewards[-1].append(reward)
+
+        # if terminated --> reset env
+        if step_output[2]:
+            env.reset(seed=rng.randint(100000))
+            action = agent.init_action()  # not saved
+            cur_state = env.step(action)[0]
+            save_states.append([cur_state])
+            save_actions.append([])
+            save_rewards.append([])
+            save_terms[-1] = True
+            save_terms.append(False)
+    return save_states, save_actions, save_rewards, save_terms
 
 
 def runner(env: gym.Env,
@@ -13,7 +57,7 @@ def runner(env: gym.Env,
            timeout: bool = False,
            debug: bool = False):
     # state-action model
-    # s_t --> model --> a_t --> env --> s_{t+1}, r_{t+1}
+    # s_t --> model --> a_t --> env --> s_{t+1}, r_{t}
     #
     # action_model must keep track of (memory)
     #   1. previous observations, 2. previous actions
