@@ -35,7 +35,8 @@ class PPODiscrete(AgentEpoch):
                  gamma: float = 0.99,
                  lam: float = 1.,
                  train_batch_size: int = 32,
-                 train_epoch: int = 8):
+                 train_epoch: int = 8,
+                 learning_rate: float = .001):
         super(PPODiscrete, self).__init__()
         # TODO: docstring (gamma = discout, lam = generalized discount adjustment)
         #       ... state_dims = mapping from state names to shapes
@@ -76,7 +77,7 @@ class PPODiscrete(AgentEpoch):
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(loss)})
-        self.kmodel.compile(tf.keras.optimizers.Adam(.001))
+        self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
         self.pi_new = pi_new
         self.pi_old = pi_old
         self.critic = v_model

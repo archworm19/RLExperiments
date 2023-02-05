@@ -69,28 +69,33 @@ class TestDiscreteAgent(TestCase):
                                  lambda: Critic(len(state_dims)),
                                  num_actions, state_dims,
                                  entropy_scale=0.0,
-                                 train_epoch=8)
+                                 eta=100.,  # TODO/TESTING
+                                 train_epoch=8,
+                                 learning_rate=0.01,
+                                 gamma=0.5)  # set this low to make problem easier
         self.num_actions = num_actions
 
     def train_statecorr(self, T: int = 10000):
-        # TODO: this isn't working for shit
         # train on state correlation reward
-        s1 = self.rng.random((T, 3)) - 0.5
-        s2 = self.rng.random((T, 5)) - 0.5
-        action = one_hot(self.rng.integers(0, self.num_actions, (T,)), 3)
-        # --> 1st 
-        reward = fake_reward_statecorr({"s1": s1, "s2": s2}, action, 1)
-        print(np.sum(s1, axis=1) + np.sum(s2, axis=1))
-        print(action)
-        print(reward)
-        # bunch of fake runs with same data
-        for _ in range(10):
+
+        def gen_data(T):
+            s1 = self.rng.random((T, 3)) - 0.5
+            s2 = self.rng.random((T, 5)) - 0.5
+            action = one_hot(self.rng.integers(0, self.num_actions, (T,)), 3)
+            # --> 1st 
+            reward = fake_reward_statecorr({"s1": s1, "s2": s2}, action, 1)
+            return s1, s2, action, reward
+
+        for _ in range(5):  # N successive runs:
+            s1, s2, action, reward = gen_data(T)
+            # bunch of fake runs with same data
             self.agent.train([{"s1": s1, "s2": s2}],
                             [reward[:-1]],
                             [action[:-1]],
                             [False])
 
         # simulate the agent:
+        s1, s2, action, reward = gen_data(T)
         pos_actions, neg_actions = [], []
         for i in range(T):
             ind = self.agent.select_action({"s1": s1[i], "s2": s2[i]})
@@ -98,12 +103,13 @@ class TestDiscreteAgent(TestCase):
                 pos_actions.append(ind)
             elif reward[i] <= -0.5:
                 neg_actions.append(ind)
-        print(pos_actions)
-
+        pos_1perc = np.sum(np.array(pos_actions) == 1) / len(pos_actions)
+        neg_1perc = np.sum(np.array(neg_actions) == 1) / len(neg_actions)
+        self.assertTrue(pos_1perc >= 0.5)
+        self.assertTrue(neg_1perc <= 0.1)
 
 
 if __name__ == "__main__":
     T = TestDiscreteAgent()
     T.setUp()
-    # T._sim_agent_statecorr()
     T.train_statecorr(1000)
