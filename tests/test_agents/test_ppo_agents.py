@@ -69,13 +69,14 @@ class TestDiscreteAgent(TestCase):
                                  lambda: Critic(len(state_dims)),
                                  num_actions, state_dims,
                                  entropy_scale=0.0,
-                                 eta=100.,  # TODO/TESTING
+                                 eta=0.3,
                                  train_epoch=8,
                                  learning_rate=0.01,
-                                 gamma=0.5)  # set this low to make problem easier
+                                 gamma=0.8)  # set this low to make problem easier
         self.num_actions = num_actions
 
-    def train_statecorr(self, T: int = 10000):
+    def train_statecorr(self):
+        T = 1000
         # train on state correlation reward
 
         def gen_data(T):
@@ -112,4 +113,4 @@ class TestDiscreteAgent(TestCase):
 if __name__ == "__main__":
     T = TestDiscreteAgent()
     T.setUp()
-    T.train_statecorr(1000)
+    T.train_statecorr()
