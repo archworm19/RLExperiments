@@ -158,8 +158,18 @@ class PPODiscrete(AgentEpoch):
         Returns:
             Dict: loss history
         """
-        V = self._calculate_v(states)
-        dset = package_dataset(states, V, reward, actions, terminated,
+        # TODO: filter out short trajectories
+        states2, actions2, rewards2, terms2 = [], [], [], []
+        for i in range(len(actions)):
+            if np.shape(actions[i])[0] > 5:
+                states2.append(states[i])
+                actions2.append(actions[i])
+                rewards2.append(reward[i])
+                terms2.append(terminated[i])
+
+
+        V = self._calculate_v(states2)
+        dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         history = self.kmodel.fit(dset.batch(self.train_batch_size),

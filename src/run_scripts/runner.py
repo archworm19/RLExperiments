@@ -1,22 +1,38 @@
 """Running Gym Simulations"""
-from pyparsing import actions
 import gymnasium as gym
-import numpy as np
 import numpy.random as npr
-from typing import Union
 from frameworks.agent import Agent, AgentEpoch
 
 
 def simple_run(env: gym.Env,
-               agent: AgentEpoch,  # TODO: align agent and agent epoch interface so this function can take both
-               num_step: int,
-               rng: npr.Generator):
+               agent: AgentEpoch,  # TODO: move to new framework
+               num_step: int):
+    action = agent.init_action()
+    cur_state = env.step(action)[0]
+    reward_sum = 0.
+    for _ in range(num_step):
+        action = agent.select_action({"core_state": cur_state})
+        step_output = env.step(action)
+        cur_state = step_output[0]
+        reward = step_output[1]
+        reward_sum += reward
+        if step_output[2]:
+            break
+    return reward_sum
+
+
+def runner_epoch(env: gym.Env,
+                 agent: AgentEpoch,  # TODO: update when agent framework updates
+                 num_step: int,
+                 rng: npr.Generator):
     # run for num_step --> restart if necessary
     # state-action model
     # s_t --> model --> a_t --> env --> s_{t+1}, r_{t}
     # returns: (lists = different trajectories)
     #       start new trajectory upon termination
-    # TODO: what do we return?
+    # 1. states (T + 1 x ...), 2. actions (T), 3. rewards (T),
+    # 4. terminations (1 entry for each trajectory)
+    #   NOTE: T shows the relative array lengths
     action = agent.init_action()  # not saved
     cur_state = env.step(action)[0]
     save_states = [[cur_state]]
@@ -25,6 +41,7 @@ def simple_run(env: gym.Env,
     save_terms = [False]
     for _ in range(num_step):
         # TODO: add other states (pixels!)
+        # TODO: take in state names?
         action = agent.select_action({"core_state": cur_state})
         step_output = env.step(action)
         cur_state = step_output[0]
@@ -37,7 +54,7 @@ def simple_run(env: gym.Env,
 
         # if terminated --> reset env
         if step_output[2]:
-            env.reset(seed=rng.randint(100000))
+            env.reset(seed=int(rng.integers(0, 100000)))
             action = agent.init_action()  # not saved
             cur_state = env.step(action)[0]
             save_states.append([cur_state])

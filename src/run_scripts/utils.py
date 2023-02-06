@@ -1,7 +1,7 @@
 """Sub-models used by model builders"""
 import tensorflow as tf
 from tensorflow.keras.layers import Dense
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, DistroStateModel
 from arch_layers.simple_networks import DenseNetwork
 from typing import List, Tuple
 
@@ -26,8 +26,27 @@ class DenseScalar(ScalarModel):
         return yp[:, 0]  # to scalar
 
 
-class DenseScalarPi(ScalarStateModel):
+class DenseScalarState(ScalarStateModel):
     # NOTE: unbounded outputs
+    # > run all states thru embeddings
+    # > concat
+    # > run thru dense network 
+    def __init__(self,
+                 embed_dims: List[int],
+                 layer_sizes: List[int],
+                 drop_rate: float):
+        super(DenseScalarState, self).__init__()
+        self.d_states = [Dense(ed) for ed in embed_dims]
+        self.net = DenseNetwork(layer_sizes, 1, drop_rate)
+
+    def call(self, state_t: List[tf.Tensor]):
+        x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]
+        yp = self.net(tf.concat(x_s, axis=1))
+        return yp[:, 0]  # to scalar
+
+
+class DenseScalarPi(ScalarStateModel):
+    # TODO: wut? this isn't actually a scalar model!
     # pi: pi(a | s)
     def __init__(self,
                  output_dims: int,
@@ -74,3 +93,21 @@ class DenseDistro(DistroModel):
         x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]
         yp = self.net(tf.concat([x_a] + x_s, axis=1))
         return yp
+
+
+class DenseDiscreteState(DistroStateModel):
+    # softmaxed output
+
+    def __init__(self,
+                 num_action: int,
+                 embed_dims: List[int],
+                 layer_sizes: List[int],
+                 drop_rate: float):
+        super(DenseDiscreteState, self).__init__()
+        self.d_states = [Dense(ed) for ed in embed_dims]
+        self.net = DenseNetwork(layer_sizes, num_action, drop_rate)
+
+    def call(self, state_t: List[tf.Tensor]):
+        x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]
+        yp = self.net(tf.concat(x_s, axis=1))
+        return tf.nn.softmax(yp, axis=1)

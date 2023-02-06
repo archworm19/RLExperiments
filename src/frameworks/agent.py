@@ -7,6 +7,12 @@ from abc import ABC
 from typing import List, Union, Dict
 
 
+# TODO: this is a good candidate for protocols / structural subtyping
+# https://peps.python.org/pep-0544/#unions-and-intersections-of-protocols
+# = most natural way to do type intersections
+# see 'Unions and intersections of protocols'
+
+
 class Agent(ABC):
 
     def init_action(self):
