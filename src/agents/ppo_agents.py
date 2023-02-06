@@ -174,7 +174,7 @@ class PPODiscrete(AgentEpoch):
                                adv_name="adv", val_name="val", action_name="action")
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=1)
+                                  verbose=0)
         # copy update actor to old actor
         copy_model(self.pi_new, self.pi_old, 1.)
         return history
