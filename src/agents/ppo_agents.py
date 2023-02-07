@@ -116,6 +116,10 @@ class PPODiscrete(AgentEpoch):
         # --> shape = num_actions (normalized)
         pr = self.pi_new(state_ord)[0].numpy()
         r = self.rng.random()
+        if debug:
+            print('probability and random draw')
+            print(pr)
+            print(r)
         return np.where(r <= np.cumsum(pr))[0][0]
 
     def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
@@ -158,7 +162,7 @@ class PPODiscrete(AgentEpoch):
         Returns:
             Dict: loss history
         """
-        # TODO: filter out short trajectories
+        # filter out short trajectories
         states2, actions2, rewards2, terms2 = [], [], [], []
         for i in range(len(actions)):
             if np.shape(actions[i])[0] > 5:

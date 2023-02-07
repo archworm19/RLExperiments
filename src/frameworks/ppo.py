@@ -153,6 +153,7 @@ def package_dataset(states: List[Dict[str, np.ndarray]],
     advs = [advantage_conv(vi, ri, gamma, lam, termi) for vi, ri, termi in
             zip(V, reward, terminated)]
     # NOTE: last value term = V(s_T) ~ no training signal there --> lop it off
+    # TODO: could this be the problem? is critic not learning termination; i don't think so
     vals = [value_conv(vi, ri, gamma, termi)[:-1] for vi, ri, termi in
             zip(V, reward, terminated)]
 

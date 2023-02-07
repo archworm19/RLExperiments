@@ -6,63 +6,35 @@ from frameworks.agent import Agent, AgentEpoch
 
 def simple_run(env: gym.Env,
                agent: AgentEpoch,  # TODO: move to new framework
-               num_step: int):
+               num_step: int,
+               debug: bool = False):
+    # TODO: docstring ~ return types
     action = agent.init_action()
     cur_state = env.step(action)[0]
-    reward_sum = 0.
+
+    # world model: s_t + a_t --> r_t, s_{t+1}
+    save_states = [cur_state]
+    save_actions, save_rewards = [], []
+    terminated = False
+
     for _ in range(num_step):
-        action = agent.select_action({"core_state": cur_state})
+        action = agent.select_action({"core_state": cur_state}, debug=debug)
         step_output = env.step(action)
         cur_state = step_output[0]
         reward = step_output[1]
-        reward_sum += reward
+
+        # saves
+        save_states.append(cur_state)
+        save_actions.append(action)
+        save_rewards.append(reward)
+
+        if debug:
+            print(reward)
+            input("cont?")
         if step_output[2]:
+            terminated = True
             break
-    return reward_sum
-
-
-def runner_epoch(env: gym.Env,
-                 agent: AgentEpoch,  # TODO: update when agent framework updates
-                 num_step: int,
-                 rng: npr.Generator):
-    # run for num_step --> restart if necessary
-    # state-action model
-    # s_t --> model --> a_t --> env --> s_{t+1}, r_{t}
-    # returns: (lists = different trajectories)
-    #       start new trajectory upon termination
-    # 1. states (T + 1 x ...), 2. actions (T), 3. rewards (T),
-    # 4. terminations (1 entry for each trajectory)
-    #   NOTE: T shows the relative array lengths
-    action = agent.init_action()  # not saved
-    cur_state = env.step(action)[0]
-    save_states = [[cur_state]]
-    save_actions = [[]]
-    save_rewards = [[]]
-    save_terms = [False]
-    for _ in range(num_step):
-        # TODO: add other states (pixels!)
-        # TODO: take in state names?
-        action = agent.select_action({"core_state": cur_state})
-        step_output = env.step(action)
-        cur_state = step_output[0]
-        reward = step_output[1]
-
-        # save data
-        save_states[-1].append(cur_state)
-        save_actions[-1].append(action)
-        save_rewards[-1].append(reward)
-
-        # if terminated --> reset env
-        if step_output[2]:
-            env.reset(seed=int(rng.integers(0, 100000)))
-            action = agent.init_action()  # not saved
-            cur_state = env.step(action)[0]
-            save_states.append([cur_state])
-            save_actions.append([])
-            save_rewards.append([])
-            save_terms[-1] = True
-            save_terms.append(False)
-    return save_states, save_actions, save_rewards, save_terms
+    return save_states, save_actions, save_rewards, terminated
 
 
 def runner(env: gym.Env,
