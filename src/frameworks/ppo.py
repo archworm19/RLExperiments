@@ -271,6 +271,10 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
             c1 from ppo paper
         entropy_scale (float): scale term for entropy
             c2 from ppo paper
+
+    Returns:
+        tf.Tensor: loss for each point
+            shape = batch_size
     """
     prob_ratio = _gauss_prob_ratio(action,
                                    pi_new_mu, pi_new_precision,
