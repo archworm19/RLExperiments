@@ -50,4 +50,4 @@ if __name__ == "__main__":
     # num_actions = EnvsDiscrete.acrobot.value.dims_actions
     env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.lunar, entropy_scale=0.5, embed_dim=16, layer_sizes=[128, 64])
     num_actions = EnvsDiscrete.lunar.value.dims_actions
-    run_and_train(env_run, env_viz, agent, num_actions, 50, 5000, 500, 500, viz_debug=False)
+    run_and_train(env_run, env_viz, agent, num_actions, 25, 30000, 3000, 3000, viz_debug=False)
