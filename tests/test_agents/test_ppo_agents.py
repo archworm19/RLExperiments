@@ -169,7 +169,7 @@ class TestContinuousAgent(TestCase):
         s1, s2, action, reward = gen_data(T)
         pos_actions, neg_actions = [], []
         for i in range(T):
-            v = self.agent.select_action({"s1": s1[i:i+1], "s2": s2[i:i+1]}, False, False)
+            v = self.agent.select_action({"s1": s1[i:i+1], "s2": s2[i:i+1]}, False, False)[0]
             if reward[i] >= 0.5:
                 pos_actions.append(v)
             elif reward[i] <= -0.5:

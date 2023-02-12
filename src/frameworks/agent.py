@@ -13,7 +13,7 @@ from typing import Protocol, List, Dict
 # see 'Unions and intersections of protocols'
 
 
-class Actor(Protocol):
+class Agent(Protocol):
 
     @abstractmethod
     def init_action(self) -> np.ndarray:

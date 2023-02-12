@@ -29,12 +29,9 @@ def run_and_train(env_run, env_viz, agent,
         num_step = 0
         while(num_step < T_run):
             env_run.reset(seed=int(rng.integers(10000)))
-            states, actions, rewards, term = simple_run(env_run, agent, run_cutoff, debug=False)
+            states, actions, rewards, term = simple_run(env_run, agent, run_cutoff, debug=False, discrete=discrete_mode)
             sv.append(np.array(states))
-            if discrete_mode:
-                av.append(_one_hot(np.array(actions), num_actions))
-            else:
-                av.append(np.array(actions))
+            av.append(np.array(actions))
             rv.append(np.array(rewards))
             tv.append(term)
             num_step += np.shape(rv[-1])[0]
@@ -44,23 +41,23 @@ def run_and_train(env_run, env_viz, agent,
                     tv)
         # test with viz
         env_viz.reset(seed=int(rng.integers(10000)))
-        _, _, reward, _ = simple_run(env_viz, agent, T_test, debug=viz_debug)
+        _, _, reward, _ = simple_run(env_viz, agent, T_test, debug=viz_debug, discrete=discrete_mode)
         print(np.sum(reward))
 
 
 if __name__ == "__main__":
-    env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.cartpole)
-    num_actions = EnvsDiscrete.cartpole.value.dims_actions
+    # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.cartpole)
+    # num_actions = EnvsDiscrete.cartpole.value.dims_actions
     # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.acrobot)
     # num_actions = EnvsDiscrete.acrobot.value.dims_actions
     # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.lunar, entropy_scale=0.5, embed_dim=16, layer_sizes=[128, 64])
     # num_actions = EnvsDiscrete.lunar.value.dims_actions
-    discrete_mode = True
+    # discrete_mode = True
 
     # continuous
-    # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
-    #                                                vf_scale=.1, entropy_scale=0.1, eta=0.3)
-    # num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
-    # discrete_mode = False
+    env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
+                                                   vf_scale=.1, entropy_scale=0.1, eta=0.3)
+    num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
+    discrete_mode = False
 
-    run_and_train(env_run, env_viz, agent, num_actions, 10, 5000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
+    run_and_train(env_run, env_viz, agent, num_actions, 20, 20000, 300, 300, viz_debug=False, discrete_mode=discrete_mode)

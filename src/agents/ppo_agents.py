@@ -5,7 +5,7 @@ import tensorflow as tf
 from typing import List, Tuple, Callable, Dict
 from tensorflow.keras.layers import Layer
 from frameworks.layer_signatures import DistroStateModel, ScalarStateModel
-from frameworks.agent import Actor, TrainEpoch
+from frameworks.agent import Agent, TrainEpoch
 from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss
 from frameworks.custom_model import CustomModel
 
@@ -22,7 +22,7 @@ def copy_model(send_model: Layer, rec_model: Layer,
     rec_model.set_weights(new_weights)
 
 
-class PPODiscrete(Actor, TrainEpoch):
+class PPODiscrete(Agent, TrainEpoch):
 
     def __init__(self,
                  pi_model_builder: Callable[[], DistroStateModel],
@@ -101,7 +101,10 @@ class PPODiscrete(Actor, TrainEpoch):
         Returns:
             np.ndarray: len = dims in action space
         """
-        return self.rng.integers(0, self.num_actions, (1, self.num_actions))
+        ind = self.rng.integers(0, self.num_actions)
+        v = np.zeros((1, self.num_actions))
+        v[0, ind] = 1.
+        return v
 
     def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
         """select 
@@ -194,7 +197,7 @@ class PPODiscrete(Actor, TrainEpoch):
         return history
 
 
-class PPOContinuous(Actor, TrainEpoch):
+class PPOContinuous(Agent, TrainEpoch):
 
     def __init__(self,
                  pi_model_builder: Callable[[], DistroStateModel],
@@ -281,7 +284,7 @@ class PPOContinuous(Actor, TrainEpoch):
         """
         # uniform distro within bounds
         ab = np.array(self.action_bounds)
-        return (ab[:,1] - ab[:,0]) * self.rng.random(size=len(self.action_bounds)) + ab[:,0]
+        return (ab[:,1] - ab[:,0]) * self.rng.random(size=(1, len(self.action_bounds))) + ab[:,0]
 
     def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
         """select 
@@ -305,7 +308,7 @@ class PPOContinuous(Actor, TrainEpoch):
         # since diagonal --> can just invert to get covar
         covar = 1. / precs
         # sample from gaussian
-        sample = self.rng.normal(mus, np.sqrt(covar), size=(1, len(mus)))[0]
+        sample = self.rng.normal(mus, np.sqrt(covar), size=(1, len(mus)))
         ab = np.array(self.action_bounds)
         sample = np.clip(sample, ab[:, 0], ab[:, 1])
 

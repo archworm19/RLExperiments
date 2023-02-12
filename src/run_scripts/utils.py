@@ -141,12 +141,6 @@ class DenseGaussState(DistroStateModel):
         self._pi = tf.math.log(tf.math.divide(v, 1. - v))
         self.prec_var = tf.Variable(initial_value=self._pi * tf.ones((len(action_bounds),)))
 
-        print(self._ranges)
-        print(self._mins)
-        print(self._pi)
-        input("cont?")
-
-
     def call(self, state_t: List[tf.Tensor]):
         # returns batch_size x (2 * action_dims)
         x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]

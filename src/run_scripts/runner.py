@@ -1,25 +1,44 @@
 """Running Gym Simulations"""
 import gymnasium as gym
-import numpy.random as npr
-from frameworks.agent import Agent, AgentEpoch
+import numpy as np
+from frameworks.agent import Agent, TrainEpoch, TrainOnLine
+
+
+# type intersections
+
+
+class AgentEpoch(Agent, TrainEpoch):
+    pass
+
+
+class AgentOnLine(Agent, TrainOnLine):
+    pass
 
 
 def simple_run(env: gym.Env,
-               agent: AgentEpoch,  # TODO: move to new framework
+               agent: AgentEpoch,
                num_step: int,
-               debug: bool = False):
+               debug: bool = False,
+               discrete: bool = True):
     # TODO: docstring ~ return types
-    action = agent.init_action()
-    cur_state = env.step(action)[0]
-
+    # NOTE: if discrete --> assumes 1-hot input
+    action = agent.init_action()[0]
+    if discrete:
+        cur_state = env.step(np.where(action > 0.5)[0][0])[0]
+    else:
+        cur_state = env.step(action)[0]
+ 
     # world model: s_t + a_t --> r_t, s_{t+1}
     save_states = [cur_state]
     save_actions, save_rewards = [], []
     terminated = False
 
     for _ in range(num_step):
-        action = agent.select_action({"core_state": cur_state}, debug=debug)
-        step_output = env.step(action)
+        action = agent.select_action({"core_state": np.array(cur_state)[None]}, debug=debug, test_mode=False)[0]
+        if discrete:
+            step_output = env.step(np.where(action > 0.5)[0][0])
+        else:
+            step_output = env.step(action)
         cur_state = step_output[0]
         reward = step_output[1]
 
@@ -38,12 +57,11 @@ def simple_run(env: gym.Env,
 
 
 def runner(env: gym.Env,
-           agent: Agent,
+           agent: AgentOnLine,
            max_step: int = 200,
            step_per_train: int = 1,
            step_per_copy: int = 1,
            train_mode: bool = True,
-           timeout: bool = False,
            debug: bool = False):
     # state-action model
     # s_t --> model --> a_t --> env --> s_{t+1}, r_{t}
@@ -51,37 +69,29 @@ def runner(env: gym.Env,
     # action_model must keep track of (memory)
     #   1. previous observations, 2. previous actions
     # action model must take in env.step output
-    # NOTE: this function should be agnostic to continuous vs. discrete
-    #   control as long as agent and environment are compatible
-    # NOTE: model records 1. states, 2. normalized time, 3. TODO: pixels
-    # NOTE: if timeout is set --> end of run marked as termination
     test_mode = not train_mode
     action = agent.init_action()
     cur_state = env.step(action)[0]
     save_rewards = []
     for i in range(max_step):
-        action = agent.select_action([cur_state, [(i + 0.) / max_step]],
-                                     test_mode=test_mode, debug=debug)
+        action = agent.select_action({"core_state": np.array(cur_state)[None]}, debug=debug)
         step_output = env.step(action)
         new_state = step_output[0]
         reward = step_output[1]
         termination = step_output[2]
 
-        # timeout
-        if (i >= (max_step - 1)) and timeout:
-            termination = True
-
         # only save training data
         if train_mode:
-            agent.save_data([cur_state, [(i + 0.) / max_step]],
-                            [new_state, [(i + 1.) / max_step]],
-                            action, reward,
-                            termination)
+            agent.save_data({"core_state": np.array(cur_state)[None]},
+                            {"core_state": np.array(new_state)[None]},
+                            np.array(action)[None],
+                            np.array(reward)[None],
+                            np.array(termination)[None])
 
         if train_mode:
             if i % step_per_train == 0:
                 agent.train()
-            # TODO: make this part of interface?
+            # TODO: make this part of interface
             if i % step_per_copy == 0:
                 agent._copy_model()
 
