@@ -260,14 +260,15 @@ class PPOContinuous(AgentEpoch):
         pi_new_distro = pi_new(s0_inputs)
         pi_old_distro = pi_old(s0_inputs)
         critic_pred = v_model(s0_inputs)
-        loss = ppo_loss_gauss(pi_old_distro[:, :len(action_bounds)], pi_old_distro[:, len(action_bounds):],
+        loss, pr_ratio = ppo_loss_gauss(pi_old_distro[:, :len(action_bounds)], pi_old_distro[:, len(action_bounds):],
                               pi_new_distro[:, :len(action_bounds)], pi_new_distro[:, len(action_bounds):],
                               critic_pred,
                               inputs[0], inputs[1], inputs[2],
                               eta, vf_scale, entropy_scale)
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_mean(loss)})
+                                  outputs={"loss": tf.math.reduce_mean(loss),
+                                           "pr_ratio": pr_ratio})
         self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
         self.pi_new = pi_new
         self.pi_old = pi_old
@@ -311,7 +312,8 @@ class PPOContinuous(AgentEpoch):
         # since diagonal --> can just invert to get covar
         covar = 1. / precs
         # sample from gaussian
-        sample = mus + self.rng.normal(size=len(mus)) * covar
+        # TODO: stddev or covar?
+        sample = mus + self.rng.normal(size=len(mus)) * np.sqrt(covar)
         ab = np.array(self.action_bounds)
         sample = np.clip(sample, ab[:, 0], ab[:, 1])
 
@@ -380,7 +382,20 @@ class PPOContinuous(AgentEpoch):
                                adv_name="adv", val_name="val", action_name="action")
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=1)
+                                  verbose=0)
+
+        # TODO/TESTING:
+        for v in dset.batch(256):
+            # print(v["adv"])
+            # print(v["action"])
+            vout = self.kmodel(v)
+            # print(vout)
+            # TODO: should be better than baseline... it often seems to be worse
+            print(tf.math.reduce_sum(v["adv"]))  # baseline
+            print(tf.math.reduce_sum(tf.cast(vout["pr_ratio"], tf.float32) * tf.cast(v["adv"], tf.float32)))
+            # input("cont?")
+            break
+
         # copy update actor to old actor
         copy_model(self.pi_new, self.pi_old, 1.)
         return history

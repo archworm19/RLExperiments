@@ -7,10 +7,10 @@ import numpy as np
 from typing import List, Dict
 
 
-def clipped_surrogate_loss(probability_ratio: tf.Tensor,
+def clipped_surrogate_likelihood(probability_ratio: tf.Tensor,
                            advantage: tf.Tensor,
                            eta: float):
-    """Clipped surrogate loss from PPO paper
+    """Clipped surrogate likelihood from PPO paper
         = E_t [ min(r_t(theta) A_t,
                     clip(r_t(theta), 1 - eta, 1 + eta) A_t) ]
 
@@ -23,7 +23,7 @@ def clipped_surrogate_loss(probability_ratio: tf.Tensor,
         eta (float): step size
 
     Returns:
-        tf.Tensor: surrogate loss for each sample
+        tf.Tensor: surrogate likelihood for each sample
             shape = batch_size
     """
     rt_clip = tf.clip_by_value(probability_ratio, 1. - eta, 1. + eta)
@@ -211,10 +211,10 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
     prob_old = tf.stop_gradient(tf.math.reduce_sum(pi_old_distro * action, axis=1))
     prob_new = tf.math.reduce_sum(pi_new_distro * action, axis=1)
     prob_ratio = tf.math.divide(prob_new, prob_old)
-    l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
+    l_clip = clipped_surrogate_likelihood(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
     negentropy = tf.math.reduce_sum(pi_new_distro * tf.math.log(pi_new_distro), axis=1)
-    return l_vf - vf_scale * l_clip + entropy_scale * negentropy
+    return vf_scale * l_vf - l_clip + entropy_scale * negentropy
 
 
 def _gauss_prob_ratio(x: tf.Tensor,
@@ -275,14 +275,15 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
     Returns:
         tf.Tensor: loss for each point
             shape = batch_size
+        tf.Tensor: prob ratio for each point
     """
     prob_ratio = _gauss_prob_ratio(action,
                                    pi_new_mu, pi_new_precision,
                                    tf.stop_gradient(pi_old_mu),
                                    tf.stop_gradient(pi_old_precision))
-    l_clip = clipped_surrogate_loss(prob_ratio, advantage, eta)
+    l_clip = clipped_surrogate_likelihood(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
     # entropy for gaussian with diagonal covar = k * log(det(var))
     #       = k * log(prod(1 / prec_i)) = -k2 * sum(prec_i)
     neg_ent = tf.math.reduce_sum(pi_new_precision, axis=1)
-    return l_vf - vf_scale * l_clip + entropy_scale * neg_ent
+    return vf_scale * l_vf - l_clip + entropy_scale * neg_ent, prob_ratio
