@@ -177,8 +177,7 @@ class TestContinuousAgent(TestCase):
         neg_mu = np.mean(neg_actions[:, 1])
         print(pos_mu)
         print(neg_mu)
-        self.assertTrue(pos_mu > 0.2)
-        self.assertTrue(neg_mu < -0.5)
+        self.assertTrue((pos_mu - neg_mu) > 1.)
 
 
 if __name__ == "__main__":

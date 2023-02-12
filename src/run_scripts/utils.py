@@ -111,3 +111,47 @@ class DenseDiscreteState(DistroStateModel):
         x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]
         yp = self.net(tf.concat(x_s, axis=1))
         return tf.nn.softmax(yp, axis=1)
+
+
+class DenseGaussState(DistroStateModel):
+    # outputs means and precisions in a batch_size x (2 * action_dim) tensor
+    # NOTE: variable precisions are not a function of inputs
+
+    def __init__(self,
+                 action_bounds: List[Tuple[float]],
+                 embed_dims: List[int],
+                 layer_sizes: List[int],
+                 drop_rate: float,
+                 init_prec: float = 1.,
+                 min_prec: float = 0.1,
+                 max_prec: float = 10.):  # maximum precision value
+        super(DenseGaussState, self).__init__()
+        self.action_bounds = action_bounds
+        self.d_states = [Dense(ed) for ed in embed_dims]
+        self.net = DenseNetwork(layer_sizes, len(action_bounds), drop_rate)
+        # bounding vars
+        self._ranges = tf.constant([ab[1] - ab[0] for ab in action_bounds], dtype=tf.float32)
+        self._mins = tf.constant([ab[0] for ab in action_bounds], dtype=tf.float32)
+        # precision:
+        # init_prec = max_prec * sigmoid(pi)
+        # pi = inv_sigmoid(init_prec / max_prec) = logit(init_prec / max_prec)
+        self.max_prec = max_prec
+        self.min_prec = min_prec
+        v = (init_prec / max_prec)
+        self._pi = tf.math.log(tf.math.divide(v, 1. - v))
+        self.prec_var = tf.Variable(initial_value=self._pi * tf.ones((len(action_bounds),)))
+
+        print(self._ranges)
+        print(self._mins)
+        print(self._pi)
+        input("cont?")
+
+
+    def call(self, state_t: List[tf.Tensor]):
+        # returns batch_size x (2 * action_dims)
+        x_s = [dse(s) for dse, s in zip(self.d_states, state_t)]
+        yp = self.net(tf.concat(x_s, axis=1))
+        mu = tf.expand_dims(self._ranges, 0) * tf.math.sigmoid(yp) + tf.expand_dims(self._mins, 0)
+        prec = self.max_prec * tf.math.sigmoid(self.prec_var) + self.min_prec
+        prec = tf.tile(tf.expand_dims(prec, 0), [tf.shape(mu)[0], 1])
+        return tf.concat([mu, prec], axis=1)

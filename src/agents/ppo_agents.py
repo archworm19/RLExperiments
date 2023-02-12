@@ -312,8 +312,7 @@ class PPOContinuous(AgentEpoch):
         # since diagonal --> can just invert to get covar
         covar = 1. / precs
         # sample from gaussian
-        # TODO: stddev or covar?
-        sample = mus + self.rng.normal(size=len(mus)) * np.sqrt(covar)
+        sample = self.rng.normal(mus, np.sqrt(covar), size=(1, len(mus)))[0]
         ab = np.array(self.action_bounds)
         sample = np.clip(sample, ab[:, 0], ab[:, 1])
 
@@ -383,19 +382,6 @@ class PPOContinuous(AgentEpoch):
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
                                   verbose=0)
-
-        # TODO/TESTING:
-        for v in dset.batch(256):
-            # print(v["adv"])
-            # print(v["action"])
-            vout = self.kmodel(v)
-            # print(vout)
-            # TODO: should be better than baseline... it often seems to be worse
-            print(tf.math.reduce_sum(v["adv"]))  # baseline
-            print(tf.math.reduce_sum(tf.cast(vout["pr_ratio"], tf.float32) * tf.cast(v["adv"], tf.float32)))
-            # input("cont?")
-            break
-
         # copy update actor to old actor
         copy_model(self.pi_new, self.pi_old, 1.)
         return history

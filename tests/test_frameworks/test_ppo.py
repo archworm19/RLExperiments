@@ -4,7 +4,7 @@ import numpy.random as npr
 import tensorflow as tf
 from unittest import TestCase
 from scipy.stats import multivariate_normal
-from frameworks.ppo import (clipped_surrogate_loss, advantage_conv, value_conv, package_dataset,
+from frameworks.ppo import (clipped_surrogate_likelihood, advantage_conv, value_conv, package_dataset,
                             _gauss_prob_ratio, ppo_loss_multiclass, ppo_loss_gauss)
 
 
@@ -23,7 +23,7 @@ class TestSurrogateLoss(TestCase):
         for x, At, eg in zip(xs, Ats, exp_g):
             with tf.GradientTape() as g:
                 g.watch(x)
-                y = clipped_surrogate_loss(x, At, 0.2)
+                y = clipped_surrogate_likelihood(x, At, 0.2)
             self.assertTrue(tf.math.reduce_all(g.gradient(y, x) == eg))
 
 
