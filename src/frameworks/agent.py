@@ -1,10 +1,10 @@
-"""Agent interface
+"""Agent interface protocols
     Exposes methods to allow 1. running, 2. training of an agent
 
 """
 import numpy as np
-from abc import ABC
-from typing import List, Union, Dict
+from abc import abstractmethod
+from typing import Protocol, List, Dict
 
 
 # TODO: this is a good candidate for protocols / structural subtyping
@@ -13,36 +13,39 @@ from typing import List, Union, Dict
 # see 'Unions and intersections of protocols'
 
 
-class Agent(ABC):
+class Actor(Protocol):
 
-    def init_action(self):
+    @abstractmethod
+    def init_action(self) -> np.ndarray:
         """Initial action agent should take
 
         Returns:
-            Union[int, List[float]]:
-                int if discrete action space
-                List[float] if continuous
+            np.ndarray: len = dims in action space
         """
-        pass
+        raise NotImplementedError
 
-    def select_action(self, state: List[np.ndarray], test_mode: bool, debug: bool):
+    @abstractmethod
+    def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
         """select 
 
         Args:
-            state (List[np.ndarray]): set of unbatched input tensors
-                each with shape:
-                    ...
+            state (Dict[str, np.ndarray]): mapping of state names to batched tensors
+                each tensor = num_sample x ...
             test_mode (bool): are we in a 'test run' for the agent?
             debug (bool): debug mode
 
         Returns:
-            Union[int, List[float]]:
-                int if discrete action space
-                List[float] if continuous
+            np.ndarray: selected actions
+                shape = num_sample x action_dims
         """
-        pass
+        raise NotImplementedError
 
-    def train(self, debug: bool):
+
+class TrainOnLine(Protocol):
+    # "OnLine" = model handles storage and train set sampling
+
+    @abstractmethod
+    def train(self, debug: bool) -> Dict:
         """train agent on saved data
 
         Args:
@@ -50,88 +53,70 @@ class Agent(ABC):
         Returns:
             Dict: loss history
         """
-        pass
+        raise NotImplementedError
 
+    @abstractmethod
     def save_data(self,
-                  state: List[List[float]],
-                  state_t1: List[List[float]],
-                  action: Union[int, float, List],
-                  reward: float,
-                  termination: bool):
-        """add single entry to replay memory
-            why here? data format is hard dependency for training
+                  state: Dict[str, np.ndarray],
+                  state_t1: Dict[str, np.ndarray],
+                  action: np.ndarray,
+                  reward: np.ndarray,
+                  termination: np.ndarray) -> None:
+        """send data to the model --> model will use
+        it for training later
 
         Args:
-            state (List[List[float]]):
-            state_t1 (List[List[float]]):
-                outer list = all the different states
-                    could be different shapes
-                inner list = dims for given state
-            action (Union[int, float, List]): action taken
-                int for discrete; float for continuous
-                List for multi-pronged acrions
-            reward (float): reward experienced
-            termination (bool): done?
-        """
-        pass
+            state (Dict[str, np.ndarray]): state(t)
+                mapping from state name to num_samples x ...
+            state_t1 (Dict[str, np.ndarray]): state(t + 1)
+                mapping from state name to num_samples x ...
+            action (np.ndarray): action(t)
+                shape = num_sample x action_dims
+            reward (np.ndarray): reward(t)
+                shape = num_sample
+            termination (np.ndarray): termination(t)
+                shape = num_sample
 
+        Returns:
+            None
+        """
+        raise NotImplementedError
+
+    @abstractmethod
     def end_epoch(self):
         """Signal to agent that epoch is over"""
-        pass
+        raise NotImplementedError
 
 
-class AgentEpoch(ABC):
-    # agent that gets trained at every epoch
-    #   doesn't need to keep track of data internally
+class TrainEpoch(Protocol):
+    # "Epoch" = send training data to model after an epoch
+    #   model does not necessarily handle any data storage
 
-    def init_action(self):
-        """Initial action agent should take
-
-        Returns:
-            Union[int, List[float]]:
-                int if discrete action space
-                List[float] if continuous
-        """
-        pass
-
-    def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool):
-        """select 
-
-        Args:
-            state (Dict[str, np.ndarray]]): mapping of state names to
-                set of unbatched input tensors
-                each with shape:
-                    ...
-            test_mode (bool): are we in a 'test run' for the agent?
-            debug (bool): debug mode
-
-        Returns:
-            Union[int, List[float]]:
-                int if discrete action space
-                List[float] if continuous
-        """
-        pass
-
+    @abstractmethod
     def train(self,
-              states: List[List[np.ndarray]],
+              states: List[Dict[str, np.ndarray]],
               reward: List[np.ndarray],
               actions: List[np.ndarray],
-              terminated: List[bool]):
+              terminated: List[bool]) -> Dict:
         """train agent on data trajectories
+        KEY: each element of outer list for each
+            argument = different trajectory/run
 
         Args:
-            states (List[List[np.ndarray]]):
+            states (List[Dict[str, np.ndarray]]):
                 outer list = each distinct state
-                inner list: elements = different trajectories
+                inner dict = mapping from state names to
+                    (T + 1) x ... arrays
             reward (List[np.ndarray]):
                 Each list is a different trajectory.
                 Each ndarray has shape T x ...
             actions (List[np.ndarray]): where len of each state
-                trajectory is T --> len of reward/action trajectory = T-1
+                Each list is a different trajectory.
+                Each ndarray has shape T x ...
             terminated (List[bool]): whether each trajectory
                 was terminated or is still running
 
         Returns:
             Dict: loss history
         """
-        pass
+        raise NotImplementedError

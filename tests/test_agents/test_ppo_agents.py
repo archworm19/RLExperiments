@@ -108,15 +108,18 @@ class TestDiscreteAgent(TestCase):
             s1, s2, action, reward = gen_data(T)
             # bunch of fake runs with same data
             self.agent.train([{"s1": s1, "s2": s2}],
-                            [reward[:-1]],
-                            [action[:-1]],
-                            [False])
+                             [reward[:-1]],
+                             [action[:-1]],
+                             [False])
 
         # simulate the agent:
         s1, s2, action, reward = gen_data(T)
         pos_actions, neg_actions = [], []
         for i in range(T):
-            ind = self.agent.select_action({"s1": s1[i], "s2": s2[i]})
+            ind_vec = self.agent.select_action({"s1": s1[i:i+1], "s2": s2[i:i+1]}, False, False)
+            ind = np.where(ind_vec[0] > 0.5)[0][0]
+            self.assertTrue(np.shape(ind_vec) == (1, self.num_actions))
+            self.assertAlmostEqual(np.sum(ind_vec), 1., 3)
             if reward[i] >= 0.5:
                 pos_actions.append(ind)
             elif reward[i] <= -0.5:
@@ -166,7 +169,7 @@ class TestContinuousAgent(TestCase):
         s1, s2, action, reward = gen_data(T)
         pos_actions, neg_actions = [], []
         for i in range(T):
-            v = self.agent.select_action({"s1": s1[i], "s2": s2[i]}, debug=False)
+            v = self.agent.select_action({"s1": s1[i:i+1], "s2": s2[i:i+1]}, False, False)
             if reward[i] >= 0.5:
                 pos_actions.append(v)
             elif reward[i] <= -0.5:
@@ -184,6 +187,6 @@ if __name__ == "__main__":
     T = TestDiscreteAgent()
     T.setUp()
     T.train_statecorr()
-    T = TestContinuousAgent()
-    T.setUp()
-    T.train_statecorr()
+    T2 = TestContinuousAgent()
+    T2.setUp()
+    T2.train_statecorr()

@@ -5,7 +5,7 @@ import tensorflow as tf
 from typing import List, Tuple, Callable, Dict
 from tensorflow.keras.layers import Layer
 from frameworks.layer_signatures import DistroStateModel, ScalarStateModel
-from frameworks.agent import AgentEpoch
+from frameworks.agent import Actor, TrainEpoch
 from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss
 from frameworks.custom_model import CustomModel
 
@@ -22,7 +22,7 @@ def copy_model(send_model: Layer, rec_model: Layer,
     rec_model.set_weights(new_weights)
 
 
-class PPODiscrete(AgentEpoch):
+class PPODiscrete(Actor, TrainEpoch):
 
     def __init__(self,
                  pi_model_builder: Callable[[], DistroStateModel],
@@ -95,44 +95,40 @@ class PPODiscrete(AgentEpoch):
         self.critic = v_model
         self._sname0 = s0_inputs[0].name
 
-    def init_action(self):
+    def init_action(self) -> np.ndarray:
         """Initial action agent should take
 
         Returns:
-            Union[int, List[float]]:
-                int if discrete action space
-                List[float] if continuous
+            np.ndarray: len = dims in action space
         """
-        return self.rng.integers(0, self.num_actions)
+        return self.rng.integers(0, self.num_actions, (1, self.num_actions))
 
-    def select_action(self, state: Dict[str, np.ndarray],
-                      test_mode: bool = False,
-                      debug: bool = False):
+    def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
         """select 
 
         Args:
-            state (Dict[str, np.ndarray]]): mapping of state names to
-                set of unbatched input tensors
-                each with shape:
-                    ...
+            state (Dict[str, np.ndarray]): mapping of state names to batched tensors
+                each tensor = num_sample x ...
             test_mode (bool): are we in a 'test run' for the agent?
             debug (bool): debug mode
 
         Returns:
-            Union[int, List[float]]:
-                int if discrete action space
-                List[float] if continuous
+            np.ndarray: selected actions
+                shape = num_sample x action_dims
         """
         # use state_names to sync order
-        state_ord = [state[k][None] for k in self.state_names]
-        # --> shape = num_actions (normalized)
-        pr = self.pi_new(state_ord)[0].numpy()
-        r = self.rng.random()
+        state_ord = [state[k] for k in self.state_names]
+        # --> shape = num_sample x num_actions (normalized)
+        pr = self.pi_new(state_ord).numpy()
+        # --> shape = num_sample x 1
+        r = self.rng.random(size=(np.shape(pr)[0], 1))
         if debug:
             print('probability and random draw')
             print(pr)
             print(r)
-        return np.where(r <= np.cumsum(pr))[0][0]
+        boolz = r <= np.cumsum(pr, axis=1)
+        v = boolz * 1.
+        return np.hstack((v[:,:1], v[:,1:] - v[:,:-1]))
 
     def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
         # TODO: tf.function?
@@ -154,20 +150,22 @@ class PPODiscrete(AgentEpoch):
               states: List[Dict[str, np.ndarray]],
               reward: List[np.ndarray],
               actions: List[np.ndarray],
-              terminated: List[bool]):
+              terminated: List[bool]) -> Dict:
         """train agent on data trajectories
+        KEY: each element of outer list for each
+            argument = different trajectory/run
 
         Args:
             states (List[Dict[str, np.ndarray]]):
-                outer list = different trajectories
-                inner dict = mapping from state names to each
-                    state
-                all states = T x ...
+                outer list = each distinct state
+                inner dict = mapping from state names to
+                    (T + 1) x ... arrays
             reward (List[np.ndarray]):
                 Each list is a different trajectory.
                 Each ndarray has shape T x ...
             actions (List[np.ndarray]): where len of each state
-                trajectory is T --> len of reward/action trajectory = T-1
+                Each list is a different trajectory.
+                Each ndarray has shape T x ...
             terminated (List[bool]): whether each trajectory
                 was terminated or is still running
 
@@ -196,7 +194,7 @@ class PPODiscrete(AgentEpoch):
         return history
 
 
-class PPOContinuous(AgentEpoch):
+class PPOContinuous(Actor, TrainEpoch):
 
     def __init__(self,
                  pi_model_builder: Callable[[], DistroStateModel],
@@ -275,36 +273,31 @@ class PPOContinuous(AgentEpoch):
         self.critic = v_model
         self._sname0 = s0_inputs[0].name
 
-    def init_action(self):
+    def init_action(self) -> np.ndarray:
         """Initial action agent should take
 
         Returns:
-            List[float]: continuous
+            np.ndarray: len = dims in action space
         """
         # uniform distro within bounds
-        return [(ab[1] - ab[0]) * self.rng.random() + ab[0]
-                for ab in self.action_bounds]
+        ab = np.array(self.action_bounds)
+        return (ab[:,1] - ab[:,0]) * self.rng.random(size=len(self.action_bounds)) + ab[:,0]
 
-    def select_action(self, state: Dict[str, np.ndarray],
-                      test_mode: bool = False,
-                      debug: bool = False):
+    def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
         """select 
 
         Args:
-            state (Dict[str, np.ndarray]]): mapping of state names to
-                set of unbatched input tensors
-                each with shape:
-                    ...
+            state (Dict[str, np.ndarray]): mapping of state names to batched tensors
+                each tensor = num_sample x ...
             test_mode (bool): are we in a 'test run' for the agent?
             debug (bool): debug mode
 
         Returns:
-            Union[int, List[float]]:
-                int if discrete action space
-                List[float] if continuous
+            np.ndarray: selected actions
+                shape = num_sample x action_dims
         """
         # use state_names to sync order
-        state_ord = [state[k][None] for k in self.state_names]
+        state_ord = [state[k] for k in self.state_names]
         # --> shape = concat[mus, precisions]
         g = self.pi_new(state_ord)[0].numpy()
         mus = g[:len(self.action_bounds)]
@@ -345,20 +338,22 @@ class PPOContinuous(AgentEpoch):
               states: List[Dict[str, np.ndarray]],
               reward: List[np.ndarray],
               actions: List[np.ndarray],
-              terminated: List[bool]):
+              terminated: List[bool]) -> Dict:
         """train agent on data trajectories
+        KEY: each element of outer list for each
+            argument = different trajectory/run
 
         Args:
             states (List[Dict[str, np.ndarray]]):
-                outer list = different trajectories
-                inner dict = mapping from state names to each
-                    state
-                all states = T x ...
+                outer list = each distinct state
+                inner dict = mapping from state names to
+                    (T + 1) x ... arrays
             reward (List[np.ndarray]):
                 Each list is a different trajectory.
                 Each ndarray has shape T x ...
             actions (List[np.ndarray]): where len of each state
-                trajectory is T --> len of reward/action trajectory = T-1
+                Each list is a different trajectory.
+                Each ndarray has shape T x ...
             terminated (List[bool]): whether each trajectory
                 was terminated or is still running
 
