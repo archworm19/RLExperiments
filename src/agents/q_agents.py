@@ -347,13 +347,14 @@ class QAgent(Agent, TrainOnLine):
         Returns:
             None
         """
-        d = {"action": action,
-             "reward": reward,
-             "termination": termination}
-        for k in self.s0_names:
-            d[k] = state[k]
-            d[k+"t1"] = state_t1[k]
-        self.mem_buffer.append(d)
+        for z in range(len(reward)):
+            d = {"action": action[z],
+                "reward": reward[z],
+                "termination": termination[z]}
+            for k in self.s0_names:
+                d[k] = state[k][z]
+                d[k+"t1"] = state_t1[k][z]
+            self.mem_buffer.append(d)
 
     def end_epoch(self):
         pass
@@ -551,20 +552,21 @@ class QAgent_distro(Agent):
         Returns:
             None
         """
-        d = {"action": action,
-             "reward": reward,
-             "termination": termination}
-        for k in self.s0_names:
-            d[k] = state[k]
-            d[k+"t1"] = state_t1[k]
-        self.mem_buffer.append(d)
+        for z in range(len(reward)):
+            d = {"action": action[z],
+                "reward": reward[z],
+                "termination": termination[z]}
+            for k in self.s0_names:
+                d[k] = state[k][z]
+                d[k+"t1"] = state_t1[k][z]
+            self.mem_buffer.append(d)
 
     def end_epoch(self):
         pass
 
 
 
-# TODO: update through here
+# TODO: updated through here
 
 
 # Continuous Agents
