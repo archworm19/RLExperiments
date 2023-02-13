@@ -91,9 +91,11 @@ class RunIface:
                                      self.rand_act_decay * self.rand_act_prob)
 
         if self.rng.random() < self.rand_act_prob:
+            v = self.rng.integers(0, self.num_actions)
             if debug:
                 print("rand select")
-            return self.rng.integers(0, self.num_actions)
+                print(v)
+            return v
         # --> action_t = num_actions x num_actions
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
@@ -277,8 +279,8 @@ class QAgent(Agent, TrainOnLine):
 
     def init_action(self):
         ind = self.run_iface.init_action()
-        v = np.zeros((self.num_actions,))
-        v[ind] = 1.
+        v = np.zeros((1, self.num_actions))
+        v[0, ind] = 1.
         return v
 
     def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
@@ -294,10 +296,14 @@ class QAgent(Agent, TrainOnLine):
             np.ndarray: selected actions
                 shape = num_sample x action_dims
         """
+        # TODO: considers state for only the first sample
         # unpack states in correct order:
-        state_upack = [state[k] for k in self.s0_names]
-        return self.run_iface.select_action(self.memory_model, state_upack,
+        state_upack = [state[k][0] for k in self.s0_names]
+        act_ind = self.run_iface.select_action(self.memory_model, state_upack,
                                             test_mode=test_mode, debug=debug)
+        v = np.zeros((1, self.num_actions))
+        v[0, act_ind] = 1.
+        return v
 
     def _copy_model(self, debug: bool = False):
         # copy weights from free_model to memory_model
@@ -476,8 +482,8 @@ class QAgent_distro(Agent, TrainOnLine):
 
     def init_action(self):
         ind = self.run_iface.init_action()
-        v = np.zeros((self.num_actions,))
-        v[ind] = 1.
+        v = np.zeros((1, self.num_actions))
+        v[0, ind] = 1.
         return v
 
     def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
@@ -493,15 +499,19 @@ class QAgent_distro(Agent, TrainOnLine):
             np.ndarray: selected actions
                 shape = num_sample x action_dims
         """
+        # TODO: only looks at first sample
         # unpack states in correct order:
-        state_upack = [state[k] for k in self.s0_names]
+        state_upack = [state[k][0] for k in self.s0_names]
         if debug:
             print("p(atom_j | a, state_t) for all a")
             action_t, state_t = build_action_probes(state_upack, self.run_iface.num_actions)
             prob = tf.nn.softmax(self.memory_model(action_t, state_t), axis=1).numpy()
             print(np.round(prob, decimals=2))
-        return self.run_iface.select_action(self.exp_model, state_upack,
+        act_ind = self.run_iface.select_action(self.exp_model, state_upack,
                                             test_mode=test_mode, debug=debug)
+        v = np.zeros((1, self.num_actions))
+        v[0, act_ind] = 1.
+        return v
 
     def _copy_model(self, debug: bool = False):
         # copy weights from free_model to memory_model
@@ -671,7 +681,8 @@ class QAgent_cont(Agent):
                                         500000)
 
     def init_action(self):
-        return self.run_iface.init_action()
+        v = self.run_iface.init_action()
+        return np.array(v)[None]
 
     def select_action(self, state: Dict[str, np.ndarray],
                       test_mode: bool = False, debug: bool = False):
@@ -683,13 +694,13 @@ class QAgent_cont(Agent):
         Returns:
             tf.Tensor: num_sample x action_dims
         """
-        state_upack = [state[k] for k in self.s0_names]
+        state_upack = [state[k][0] for k in self.s0_names]
         act = self.run_iface.select_action(self.piprime_model, state_upack,
                                            test_mode=test_mode, debug=debug)
         if debug:
             print(self.qprime_model(tf.expand_dims(tf.constant(act), 0),
                                     [tf.expand_dims(si, 0) for si in state]))
-        return act
+        return np.array(act)[None]
 
     def _copy_model(self, debug: bool = False):
         copy_model(self.q_model, self.qprime_model, self.tau)

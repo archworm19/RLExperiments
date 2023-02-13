@@ -69,7 +69,6 @@ def build_discrete_q(env: EnvsDiscrete,
                      tau: float = 0.05,
                      train_epoch: int = 1,
                      batch_size: int = 64):
-    # states: 1. dim defined by env, 2. time (1)
     # build environment
     env_run, env_disp = _build_env(env.value)
     # build the discrete q learning model
@@ -81,7 +80,7 @@ def build_discrete_q(env: EnvsDiscrete,
                    build_q,
                    rng,
                    env.value.dims_actions,
-                   [(env.value.dims_obs,), (1,)],
+                   {"core_state": (env.value.dims_obs,)},
                    gamma=gamma,
                    tau=tau,
                    num_batch_sample=num_batch_sample,
@@ -102,7 +101,6 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
                            tau: float = 0.05,
                            train_epoch: int = 1,
                            batch_size: int = 64):
-    # states: 1. dim defined by env, 2. time (1)
     # NOTE: num_atoms, Vmin, Vmax specify the support of the distribution
     # build environment
     env_run, env_disp = _build_env(env.value)
@@ -110,7 +108,7 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
     num_actions = env.value.dims_actions
     rng = npr.default_rng(42)
     def build_q():
-        return DenseDistro(embed_dim, layer_sizes, drop_rate, num_atoms)
+        return DenseDistro([embed_dim], layer_sizes, drop_rate, num_atoms)
     run_iface = RunIface(num_actions, rng)
     ind0 = np.argmin(np.fabs(np.linspace(Vmin, Vmax, num_atoms)))
     v0 = [0] * num_atoms
@@ -121,7 +119,7 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
                          build_q,
                          rng,
                          num_actions,
-                         [(env.value.dims_obs,), (1,)],
+                         {"core_state": (env.value.dims_obs,)},
                          vector0,
                          Vmin=Vmin,
                          Vmax=Vmax,
@@ -145,7 +143,6 @@ def build_continuous_q(env: EnvsContinuous,
                        batch_size: int = 64,
                        sigma: float = 0.2,
                        theta: float = 0.15):
-    # states: 1. dim defined by env, 2. time (1)
     # NOTE: sigma, theta used for correlated noise
     env_run, env_disp = _build_env(env.value)
     # continuous control Q agent
@@ -165,7 +162,7 @@ def build_continuous_q(env: EnvsContinuous,
     #   tendency for pi to blow up --> no exploration possible
     Qa = QAgent_cont(run_iface, build_q, build_pi, rng,
                         action_bounds,
-                        [(env.value.dims_obs,), (1,)],
+                        {"core_state": (env.value.dims_obs,)},
                         gamma=gamma,
                         tau=tau,
                         batch_size=batch_size,

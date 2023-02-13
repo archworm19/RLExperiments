@@ -7,16 +7,12 @@ from frameworks.agent import Agent, TrainEpoch, TrainOnLine
 # type intersections
 
 
-class AgentEpoch(Agent, TrainEpoch):
-    pass
-
-
 class AgentOnLine(Agent, TrainOnLine):
     pass
 
 
 def simple_run(env: gym.Env,
-               agent: AgentEpoch,
+               agent: Agent,
                num_step: int,
                debug: bool = False,
                discrete: bool = True):
@@ -61,39 +57,41 @@ def runner(env: gym.Env,
            max_step: int = 200,
            step_per_train: int = 1,
            step_per_copy: int = 1,
-           train_mode: bool = True,
-           debug: bool = False):
+           debug: bool = False,
+           discrete: bool = True):
     # state-action model
     # s_t --> model --> a_t --> env --> s_{t+1}, r_{t}
     #
     # action_model must keep track of (memory)
     #   1. previous observations, 2. previous actions
     # action model must take in env.step output
-    test_mode = not train_mode
-    action = agent.init_action()
-    cur_state = env.step(action)[0]
+    action = agent.init_action()[0]
+    if discrete:
+        cur_state = env.step(np.where(action > 0.5)[0][0])[0]
+    else:
+        cur_state = env.step(action)[0]
     save_rewards = []
     for i in range(max_step):
-        action = agent.select_action({"core_state": np.array(cur_state)[None]}, debug=debug)
-        step_output = env.step(action)
+        action = agent.select_action({"core_state": np.array(cur_state)[None]}, debug=debug, test_mode=False)[0]
+        if discrete:
+            step_output = env.step(np.where(action > 0.5)[0][0])
+        else:
+            step_output = env.step(action)
         new_state = step_output[0]
         reward = step_output[1]
         termination = step_output[2]
 
-        # only save training data
-        if train_mode:
-            agent.save_data({"core_state": np.array(cur_state)[None]},
-                            {"core_state": np.array(new_state)[None]},
-                            np.array(action)[None],
-                            np.array(reward)[None],
-                            np.array(termination)[None])
+        agent.save_data({"core_state": np.array(cur_state)[None]},
+                        {"core_state": np.array(new_state)[None]},
+                        np.array(action)[None],
+                        np.array(reward)[None],
+                        np.array(termination)[None])
 
-        if train_mode:
-            if i % step_per_train == 0:
-                agent.train()
-            # TODO: make this part of interface
-            if i % step_per_copy == 0:
-                agent._copy_model()
+        if i % step_per_train == 0:
+            agent.train()
+        # TODO: make this part of interface
+        if i % step_per_copy == 0:
+            agent._copy_model()
 
         save_rewards.append(reward)
         cur_state = new_state
