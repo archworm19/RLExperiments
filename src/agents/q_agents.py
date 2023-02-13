@@ -8,7 +8,7 @@
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
-from typing import List, Union, Callable, Tuple, Dict
+from typing import List, Callable, Tuple, Dict
 from tensorflow.keras.layers import Layer
 from frameworks.agent import Agent, TrainOnLine
 from frameworks.q_learning import (calc_q_error_sm, calc_q_error_critic, calc_q_error_actor,
@@ -396,7 +396,7 @@ class ExpModel(ScalarModel):
         return q + tf.random.normal(tf.shape(q), stddev=self.r_std_dev)
 
 
-class QAgent_distro(Agent):
+class QAgent_distro(Agent, TrainOnLine):
     # distributional approach
     # discrete control
 
@@ -432,7 +432,6 @@ class QAgent_distro(Agent):
         self.train_epoch = train_epoch
         self.rng = rng
 
-        # multi-state system
         inputs = [tf.keras.Input(shape=(num_actions,),
                                  name="action", dtype=tf.float32),
                   tf.keras.Input(shape=(),
@@ -565,10 +564,6 @@ class QAgent_distro(Agent):
         pass
 
 
-
-# TODO: updated through here
-
-
 # Continuous Agents
 
 
@@ -582,7 +577,7 @@ class QAgent_cont(Agent):
                  pi_model_builder: Callable[[], ScalarStateModel],
                  rng: npr.Generator,
                  action_bounds: List[Tuple[float]],
-                 state_dims: List[Tuple[int]],
+                 state_dims: Dict[str, Tuple[int]],
                  gamma: float = 0.7,
                  tau: float = 0.01,
                  batch_size: int = 128,
@@ -605,9 +600,8 @@ class QAgent_cont(Agent):
             rng (npr.Generator):
             action_bounds (List[Tuple[int]]): (lb, ub) pairs for each
                 action dimension
-            state_dims (List[List[int]]): shape of each state tensor
-                Ex: if we want to supply base state + pixels -->
-                    it's useful to subit them as separate state tensors
+            state_dims (Dict[str, List[int]]): mapping of state names
+                to state tensor sizes
             gamma (float): discount factor
             tau (float): update rate (often referred to as alpha in literature)
                 after training eval, eval weights are copied to selection
@@ -629,24 +623,22 @@ class QAgent_cont(Agent):
         self.num_batch_sample = num_batch_sample
         self.train_epoch = train_epoch
         self.rng = rng
-        action_dims = len(action_bounds)
 
-        # multi-state system
-        s0_names = ["state" + str(i) for i in range(len(state_dims))]
-        s1_names = ["state" + str(i) + "_t1" for i in range(len(state_dims))]
-        s0_inputs = [tf.keras.Input(shape=s, dtype=tf.float32, name=n)
-                     for s, n in zip(state_dims, s0_names)]
-        s1_inputs = [tf.keras.Input(shape=s, dtype=tf.float32, name=n)
-                     for s, n in zip(state_dims, s1_names)]
-        inputs = [tf.keras.Input(shape=(action_dims,),
+        inputs = [tf.keras.Input(shape=(len(action_bounds),),
                                  name="action", dtype=tf.float32),
                   tf.keras.Input(shape=(),
                                  name="reward", dtype=tf.float32),
                   tf.keras.Input(shape=(),
                                  name="termination", dtype=tf.float32)]
+        s0_names = [k for k in state_dims]
+        s0_inputs = [tf.keras.Input(shape=state_dims[k], dtype=tf.float32, name=k)
+                     for k in s0_names]
+        s1_inputs = [tf.keras.Input(shape=state_dims[k], dtype=tf.float32, name=k+"t1")
+                     for k in s0_names]
         inputs = inputs + s0_inputs + s1_inputs
         self.s0_names = s0_names
-        self.s1_names = s1_names
+        self.s1_names = [inp.name for inp in s1_inputs]
+
         # loss ~ continuous Q error framework
         Q_err, _ = calc_q_error_critic(self.q_model,
                                      self.qprime_model,
@@ -681,19 +673,18 @@ class QAgent_cont(Agent):
     def init_action(self):
         return self.run_iface.init_action()
 
-    def select_action(self, state: List[np.ndarray],
+    def select_action(self, state: Dict[str, np.ndarray],
                       test_mode: bool = False, debug: bool = False):
         """greedy action selection
 
         Args:
-            state (List[np.ndarray]): set of unbatched input tensors
-                each with shape:
-                    ...
+            state (Dict[str, np.ndarray]):
 
         Returns:
-            int: index of selected action
+            tf.Tensor: num_sample x action_dims
         """
-        act = self.run_iface.select_action(self.piprime_model, state,
+        state_upack = [state[k] for k in self.s0_names]
+        act = self.run_iface.select_action(self.piprime_model, state_upack,
                                            test_mode=test_mode, debug=debug)
         if debug:
             print(self.qprime_model(tf.expand_dims(tf.constant(act), 0),
@@ -730,7 +721,7 @@ class QAgent_cont(Agent):
                                   verbose=0)
 
         # update actor
-        # TODO: this is a little diff cuz paper constructin
+        # NOTE: this is a little diff cuz paper construction
         # is not minibatched
         for v in dset.batch(self.batch_size):
             full_state = [v[k] for k in self.s0_names]
@@ -739,20 +730,37 @@ class QAgent_cont(Agent):
         return history
 
     def save_data(self,
-                  state: List[List[float]],
-                  state_t1: List[List[float]],
-                  action: Union[int, float, List],
-                  reward: float,
-                  termination: bool):
-        d = {"action": action,
-             "reward": reward,
-             "termination": termination}
-        for n, v in zip(self.s0_names, state):
-            d[n] = v
-        for n, v in zip(self.s1_names, state_t1):
-            d[n] = v
-        self.mem_buffer.append(d)
+                  state: Dict[str, np.ndarray],
+                  state_t1: Dict[str, np.ndarray],
+                  action: np.ndarray,
+                  reward: np.ndarray,
+                  termination: np.ndarray) -> None:
+        """send data to the model --> model will use
+        it for training later
+
+        Args:
+            state (Dict[str, np.ndarray]): state(t)
+                mapping from state name to num_samples x ...
+            state_t1 (Dict[str, np.ndarray]): state(t + 1)
+                mapping from state name to num_samples x ...
+            action (np.ndarray): action(t)
+                shape = num_sample x action_dims
+            reward (np.ndarray): reward(t)
+                shape = num_sample
+            termination (np.ndarray): termination(t)
+                shape = num_sample
+
+        Returns:
+            None
+        """
+        for z in range(len(reward)):
+            d = {"action": action[z],
+                "reward": reward[z],
+                "termination": termination[z]}
+            for k in self.s0_names:
+                d[k] = state[k][z]
+                d[k+"t1"] = state_t1[k][z]
+            self.mem_buffer.append(d)
 
     def end_epoch(self):
         self.run_iface.x_noise = self.run_iface.x_noise * 0.
-        pass

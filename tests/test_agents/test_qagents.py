@@ -10,6 +10,12 @@ from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont, QAgent_
 from arch_layers.simple_networks import DenseNetwork
 
 
+def _one_hot(x: np.ndarray, num_action: int):
+    # --> T x num_action
+    v = [1. * (x == i) for i in range(num_action)]
+    return np.concatenate([vi[:, None] for vi in v], axis=1)
+
+
 class DenseScalar(ScalarModel):
     # simple scalar model
     def __init__(self):
@@ -129,21 +135,25 @@ class TestDQN(TestCase):
         self.QA = QAgent(run_iface,
                          q_builder,
                          rng,
-                         2, [(2,)],
+                         2,
+                         {"state": (2,)},
                          gamma=0.9,
                          tau=.5)
         # load in data:
         self.r = 2
         dat = _fake_data_reward_button(100, r=self.r)
         for i in range(len(dat[0])):
-            self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
-                               dat[3][i], dat[4][i])
+            self.QA.save_data({"state": dat[0][i:i+1]}, {"state": dat[1][i:i+1]},
+                              _one_hot(dat[2][i:i+1], 2),
+                              dat[3][i:i+1], dat[4][i:i+1])
 
     def test_dset_build(self):
         dset = self.QA._draw_sample().batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
-            self.assertTrue(tf.reduce_all(tf.shape(v["state0"]) ==
+            self.assertTrue(tf.reduce_all(tf.shape(v["action"]) ==
+                                          tf.constant([32, 2], dtype=tf.int32)))
+            self.assertTrue(tf.reduce_all(tf.shape(v["statet1"]) ==
                                           tf.constant([32, 2], dtype=tf.int32)))
             vout = self.QA.kmodel(v)
             self.assertTrue(len(tf.shape(vout["loss"]).numpy()) == 0)
@@ -173,7 +183,7 @@ class TestDQN(TestCase):
 
         for v in self.QA._draw_sample().batch(32):
             rews = v["reward"].numpy()
-            q = self.QA.memory_model(v["action"], [v["state0"]]).numpy()
+            q = self.QA.memory_model(v["action"], [v["state"]]).numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
             self.assertAlmostEqual(exp_q, q_rew, places=1)
@@ -195,7 +205,8 @@ class TestDQNdistro(TestCase):
         self.QA = QAgent_distro(run_iface,
                                 q_builder,
                                 rng,
-                                2, [(2,)],
+                                2,
+                                {"state": (2,)},
                                 vector0,
                                 Vmin = -1 * self.Vmax,
                                 Vmax = self.Vmax,
@@ -209,8 +220,9 @@ class TestDQNdistro(TestCase):
 
     def _load_data(self, dat):
         for i in range(len(dat[0])):
-            self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
-                                dat[3][i], dat[4][i])
+            self.QA.save_data({"state": dat[0][i:i+1]}, {"state": dat[1][i:i+1]},
+                              _one_hot(dat[2][i:i+1], 2),
+                              dat[3][i:i+1], dat[4][i:i+1])
 
     def test_reward_button(self):
         # load in reward button data
@@ -227,7 +239,7 @@ class TestDQNdistro(TestCase):
         #       assuming high enough gamma --> expected reward approaches Vmax
         for v in self.QA._draw_sample().batch(32):
             # test model expectation
-            exp_q = self.QA.exp_model(v["action"], [v["state0"]])
+            exp_q = self.QA.exp_model(v["action"], [v["state"]])
             self.assertTrue(tf.math.reduce_all(tf.math.abs(self.Vmax - exp_q) < 1.5))
             break
 
@@ -245,8 +257,8 @@ class TestDQNdistro(TestCase):
 
         for v in self.QA._draw_sample().batch(32):
             # test model expectation
-            sum_state = tf.math.reduce_sum(v["state0"], axis=1)
-            exp_q = self.QA.exp_model(v["action"], [v["state0"]])
+            sum_state = tf.math.reduce_sum(v["state"], axis=1)
+            exp_q = self.QA.exp_model(v["action"], [v["state"]])
             term_states = tf.cast(sum_state < 0, tf.float32)
             termq = tf.divide(tf.math.reduce_sum(term_states * exp_q),
                               tf.math.reduce_sum(term_states))
@@ -270,7 +282,8 @@ class TestDQNcont(TestCase):
             return DenseScalarPi(bounds, 4, [4], 0.)
         self.state_dims = 3
         self.QA = QAgent_cont(run_iface, q_builder, pi_builder,
-                              rng, bounds, [(self.state_dims,)],
+                              rng, bounds,
+                              {"state": (self.state_dims,)},
                               tau=0.1,
                               critic_lr=.01, actor_lr=.005)
         self.buffer_size = 5000
@@ -278,8 +291,9 @@ class TestDQNcont(TestCase):
 
     def _load_data(self, dat):
         for i in range(len(dat[0])):
-            self.QA.save_data([dat[0][i]], [dat[1][i]], dat[2][i],
-                                dat[3][i], dat[4][i])
+            self.QA.save_data({"state": dat[0][i:i+1]}, {"state": dat[1][i:i+1]},
+                              dat[2][i:i+1],
+                              dat[3][i:i+1], dat[4][i:i+1])
 
     def test_dset_build(self):
         # load in data:
@@ -290,7 +304,9 @@ class TestDQNcont(TestCase):
         dset = self.QA._draw_sample().batch(32)
         for v in dset:
             self.assertEqual(tf.shape(v["reward"]).numpy(), (32,))
-            self.assertTrue(tf.reduce_all(tf.shape(v["state0"]) ==
+            self.assertTrue(tf.reduce_all(tf.shape(v["action"]) ==
+                                          tf.constant([32, 2], dtype=tf.int32)))
+            self.assertTrue(tf.reduce_all(tf.shape(v["state"]) ==
                                           tf.constant([32, self.state_dims], dtype=tf.int32)))
             vout = self.QA.kmodel(v)
             self.assertTrue(len(tf.shape(vout["loss"]).numpy()) == 0)
@@ -312,14 +328,14 @@ class TestDQNcont(TestCase):
         #   1. Q(pi, state_t), 2. r + gamma * Q(pi, state_t1)
         for v in self.QA._draw_sample().batch(32):
             # action calc
-            act = self.QA.piprime_model([v["state0"]])
+            act = self.QA.piprime_model([v["state"]])
             self.assertTrue(tf.math.reduce_all(act >= 0.95))
 
             # q calc ~ this is basically just testing whether
             # q loss in model is calculated correctly
-            q = self.QA.qprime_model(v["action"], [v["state0"]])
-            act_t1 = self.QA.piprime_model([v["state0_t1"]])
-            q_t1 = self.QA.qprime_model(act_t1, [v["state0_t1"]])
+            q = self.QA.qprime_model(v["action"], [v["state"]])
+            act_t1 = self.QA.piprime_model([v["statet1"]])
+            q_t1 = self.QA.qprime_model(act_t1, [v["statet1"]])
             target = tf.cast(v["reward"], q_t1.dtype) + self.QA.gamma * q_t1
             self.assertTrue(tf.math.reduce_mean(tf.math.pow(target - q, 2.)) < .2)
             break
@@ -337,15 +353,15 @@ class TestDQNcont(TestCase):
 
         for v in self.QA._draw_sample().batch(128):
             # action calc
-            s = tf.math.reduce_sum(v["state0"], axis=1)
-            act = tf.math.reduce_sum(self.QA.piprime_model([v["state0"]]), axis=1)
+            s = tf.math.reduce_sum(v["state"], axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["state"]]), axis=1)
             # state - action correlation ~ should be high
             corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
             self.assertTrue(corr.numpy() > 0.3)
 
             # correlation with s(t+1)? shouldn't be
-            s = tf.math.reduce_sum(v["state0"], axis=1)
-            act = tf.math.reduce_sum(self.QA.piprime_model([v["state0_t1"]]), axis=1)
+            s = tf.math.reduce_sum(v["state"], axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["statet1"]]), axis=1)
             corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
             self.assertTrue(corr.numpy() < 0.3)
             break
