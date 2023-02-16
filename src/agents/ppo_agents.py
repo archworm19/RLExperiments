@@ -204,11 +204,11 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
 
     def load_weights(self, directory_location: str):
         d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
-        actor_weights = [d_actor["arr_" + i] for i in range(len(d_actor))]
+        actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
         self.pi_new.set_weights(actor_weights)
         self.pi_old.set_weights(actor_weights)  # TODO: necessary?
         d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
-        critic_weights = [d_critic["arr_" + i] for i in range(len(d_critic))]
+        critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
         self.critic.set_weights(critic_weights)
 
 
@@ -406,9 +406,9 @@ class PPOContinuous(Agent, TrainEpoch):
 
     def load_weights(self, directory_location: str):
         d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
-        actor_weights = [d_actor["arr_" + i] for i in range(len(d_actor))]
+        actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
         self.pi_new.set_weights(actor_weights)
         self.pi_old.set_weights(actor_weights)  # TODO: necessary?
         d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
-        critic_weights = [d_critic["arr_" + i] for i in range(len(d_critic))]
+        critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
         self.critic.set_weights(critic_weights)
