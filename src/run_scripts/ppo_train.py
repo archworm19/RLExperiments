@@ -1,6 +1,10 @@
 """PPO"""
+import os
 import numpy as np
 import numpy.random as npr
+from typing import Callable
+from multiprocessing import connection, Process, Pipe
+from functools import partial
 from run_scripts.runner import simple_run
 from run_scripts.builders import EnvsDiscrete, EnvsContinuous, build_discrete_ppo, build_continuous_ppo
 
@@ -45,6 +49,72 @@ def run_and_train(env_run, env_viz, agent,
         print(np.sum(reward))
 
 
+# TODO: design for parallelism?
+# > child vs. parent process?
+#   parent train; children run
+#   children copy parent model
+# > model sharing
+#   use keras save/load
+#   interface?
+#       save_model()
+#       load_model(root_directory: str)
+#   if there are multiple models --> model itself handles the internals (i.e. make subdirectories for diff models)
+# > we need to make different keras models for ppo (forward/no_train model)
+# > TODO: might be better/more efficient to just share weights... cuz graph will remain the same!!
+# > data sharing
+#   LAZY soln (no generator and potentially inefficient data storage)
+#   save each field output of simple run as npz
+#       Ex: reward = npz where different arrays are different trajectories
+#   parent loads and passes into train
+# > parallelism
+#   start simple: just use pool
+#       pass in model location directory to each process
+#       get back the locations of the saved data
+#   TODO: if we're sharing weights --> better to keep static pool of processes
+#       
+# > delete old saved data
+
+
+def _ll_run(conn: connection.Connection,
+            builder: Callable,  # --> env_run and agent
+            process_id: int,
+            weight_directory: str,
+            data_directory: str,
+            T_run: int,
+            run_cutoff: int,
+            rand_seed: int,
+            discrete_mode: bool = True):
+    # process function:
+    # > builds
+    # > waits for signal --> load weights from directory --> saves run data
+    rng = npr.default_rng(rand_seed)
+    env_run, _, agent = builder()
+
+    while True:
+        run_sig = conn.recv()
+
+        if not run_sig:
+            break
+
+        # TODO: TESTING THIS
+        # agent.load_weights(weight_directory)
+        sv, av, rv, tv = [], [], [], []
+        num_step = 0
+        while(num_step < T_run):
+            env_run.reset(seed=int(rng.integers(10000)))
+            states, actions, rewards, term = simple_run(env_run, agent, run_cutoff, debug=False, discrete=discrete_mode)
+            sv.append(np.array(states))
+            av.append(np.array(actions))
+            rv.append(np.array(rewards))
+            tv.append(term)
+            num_step += np.shape(rv[-1])[0]
+        # overwrite old data:  NOTE: this is dangerous
+        np.savez(os.path.join(data_directory, "states{0}.npz".format(process_id)), *sv)
+        np.savez(os.path.join(data_directory, "actions{0}.npz").format(process_id), *av)
+        np.savez(os.path.join(data_directory, "rewards{0}.npz").format(process_id), *rv)
+        np.save(os.path.join(data_directory, "termination{0}.npy").format(process_id), np.array(tv))
+
+
 if __name__ == "__main__":
     # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.cartpole)
     # num_actions = EnvsDiscrete.cartpole.value.dims_actions
@@ -58,9 +128,30 @@ if __name__ == "__main__":
     # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
     #                                                vf_scale=.1, entropy_scale=0.1, eta=0.3)
     # num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
-    env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
-                                                   vf_scale=.1, entropy_scale=0.1, eta=0.3, layer_sizes=[128, 64])
-    num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
-    discrete_mode = False
+    # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
+    #                                                vf_scale=.1, entropy_scale=0.1, eta=0.3, layer_sizes=[128, 64])
+    # num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
+    # discrete_mode = False
 
-    run_and_train(env_run, env_viz, agent, num_actions, 20, 20000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
+    # run_and_train(env_run, env_viz, agent, num_actions, 20, 20000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
+
+
+    # TODO: test parallel agent
+    builder = partial(build_discrete_ppo, env=EnvsDiscrete.cartpole)
+    parent_conn, child_conn = Pipe()
+    # TODO: testing without weight loading
+    func_target = partial(_ll_run,
+                          conn=child_conn,
+                          builder=builder,
+                          process_id=420,
+                          weight_directory='weightdir',
+                          data_directory='datadir',
+                          T_run=1000,
+                          run_cutoff=500,
+                          rand_seed=420,
+                          discrete_mode=True)
+    p = Process(target=func_target)
+    p.start()
+    parent_conn.send(True)
+    parent_conn.send(False)
+    p.join()
