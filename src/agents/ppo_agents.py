@@ -1,11 +1,12 @@
 """Proximal Policy Optimization (PPO) agents"""
+import os
 import numpy as np
 import numpy.random as npr
 import tensorflow as tf
 from typing import List, Tuple, Callable, Dict
 from tensorflow.keras.layers import Layer
 from frameworks.layer_signatures import DistroStateModel, ScalarStateModel
-from frameworks.agent import Agent, TrainEpoch
+from frameworks.agent import Agent, TrainEpoch, WeightMate
 from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss
 from frameworks.custom_model import CustomModel
 
@@ -22,7 +23,7 @@ def copy_model(send_model: Layer, rec_model: Layer,
     rec_model.set_weights(new_weights)
 
 
-class PPODiscrete(Agent, TrainEpoch):
+class PPODiscrete(Agent, TrainEpoch, WeightMate):
 
     def __init__(self,
                  pi_model_builder: Callable[[], DistroStateModel],
@@ -195,6 +196,20 @@ class PPODiscrete(Agent, TrainEpoch):
         # copy update actor to old actor
         copy_model(self.pi_new, self.pi_old, 1.)
         return history
+
+    def save_weights(self, directory_location: str):
+        # get_weights --> List[np.ndarray]
+        np.savez(os.path.join(directory_location, "actor_weights.npz"), *self.pi_new.get_weights())
+        np.savez(os.path.join(directory_location, "critic_weights.npz"), *self.critic.get_weights())
+
+    def load_weights(self, directory_location: str):
+        d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
+        actor_weights = [d_actor["arr_" + i] for i in range(len(d_actor))]
+        self.pi_new.set_weights(actor_weights)
+        self.pi_old.set_weights(actor_weights)  # TODO: necessary?
+        d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
+        critic_weights = [d_critic["arr_" + i] for i in range(len(d_critic))]
+        self.critic.set_weights(critic_weights)
 
 
 class PPOContinuous(Agent, TrainEpoch):
@@ -383,3 +398,17 @@ class PPOContinuous(Agent, TrainEpoch):
         # copy update actor to old actor
         copy_model(self.pi_new, self.pi_old, 1.)
         return history
+
+    def save_weights(self, directory_location: str):
+        # get_weights --> List[np.ndarray]
+        np.savez(os.path.join(directory_location, "actor_weights.npz"), *self.pi_new.get_weights())
+        np.savez(os.path.join(directory_location, "critic_weights.npz"), *self.critic.get_weights())
+
+    def load_weights(self, directory_location: str):
+        d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
+        actor_weights = [d_actor["arr_" + i] for i in range(len(d_actor))]
+        self.pi_new.set_weights(actor_weights)
+        self.pi_old.set_weights(actor_weights)  # TODO: necessary?
+        d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
+        critic_weights = [d_critic["arr_" + i] for i in range(len(d_critic))]
+        self.critic.set_weights(critic_weights)

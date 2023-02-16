@@ -7,12 +7,6 @@ from abc import abstractmethod
 from typing import Protocol, List, Dict
 
 
-# TODO: this is a good candidate for protocols / structural subtyping
-# https://peps.python.org/pep-0544/#unions-and-intersections-of-protocols
-# = most natural way to do type intersections
-# see 'Unions and intersections of protocols'
-
-
 class Agent(Protocol):
 
     @abstractmethod
@@ -119,4 +113,18 @@ class TrainEpoch(Protocol):
         Returns:
             Dict: loss history
         """
+        raise NotImplementedError
+
+
+class WeightMate(Protocol):
+    # saving and loading weights
+    #   --> share weights between model instances
+    # agnostic to storage format
+
+    @abstractmethod
+    def save_weights(self, directory_location: str):
+        raise NotImplementedError
+
+    @abstractmethod
+    def load_weights(self, directory_location: str):
         raise NotImplementedError
