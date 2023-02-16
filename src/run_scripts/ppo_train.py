@@ -50,14 +50,17 @@ if __name__ == "__main__":
     # num_actions = EnvsDiscrete.cartpole.value.dims_actions
     # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.acrobot)
     # num_actions = EnvsDiscrete.acrobot.value.dims_actions
-    env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.lunar, entropy_scale=0.5, embed_dim=16, layer_sizes=[128, 64])
-    num_actions = EnvsDiscrete.lunar.value.dims_actions
-    discrete_mode = True
+    # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.lunar, entropy_scale=0.5, embed_dim=16, layer_sizes=[128, 64])
+    # num_actions = EnvsDiscrete.lunar.value.dims_actions
+    # discrete_mode = True
 
     # continuous
     # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
     #                                                vf_scale=.1, entropy_scale=0.1, eta=0.3)
     # num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
-    # discrete_mode = False
+    env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
+                                                   vf_scale=.1, entropy_scale=0.1, eta=0.3, layer_sizes=[128, 64])
+    num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
+    discrete_mode = False
 
-    run_and_train(env_run, env_viz, agent, num_actions, 20, 20000, 300, 300, viz_debug=False, discrete_mode=discrete_mode)
+    run_and_train(env_run, env_viz, agent, num_actions, 20, 20000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
