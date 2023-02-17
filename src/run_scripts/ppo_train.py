@@ -171,7 +171,6 @@ if __name__ == "__main__":
 
     # run_and_train(env_run, env_viz, agent, num_actions, 20, 20000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
 
-
     # parallel + queue
     builder = partial(build_discrete_ppo, env=EnvsDiscrete.cartpole)
-    ll_run_and_train_queue(builder, 1, 'weights/', 6, int(4*10000), 500, 500, 42, discrete_mode=True)
+    ll_run_and_train_queue(builder, 4, 'weights/', 50, 1000, 500, 500, 42, discrete_mode=False, viz_debug=False)
