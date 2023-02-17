@@ -5,7 +5,7 @@ import tensorflow as tf
 from unittest import TestCase
 from scipy.stats import multivariate_normal
 from frameworks.ppo import (clipped_surrogate_likelihood, advantage_conv, value_conv, package_dataset,
-                            _gauss_prob_ratio, ppo_loss_multiclass, ppo_loss_gauss)
+                            _gauss_prob_ratio2, ppo_loss_multiclass, ppo_loss_gauss)
 
 
 class TestSurrogateLoss(TestCase):
@@ -94,7 +94,7 @@ class TestLosses(TestCase):
         mu2 = rng.random((N, 2))
         var2 = rng.random((N, 2))
         x = rng.random((N, 2))
-        tf_ratio = _gauss_prob_ratio(tf.constant(x, dtype=tf.float32),
+        tf_ratio = _gauss_prob_ratio2(tf.constant(x, dtype=tf.float32),
                                     tf.constant(mu, dtype=tf.float32),
                                     1. / tf.constant(var, dtype=tf.float32),
                                     tf.constant(mu2, dtype=tf.float32),
@@ -166,12 +166,14 @@ class TestLosses(TestCase):
         # bad model ~ wrong direction
         mu_bad = mu_base - (action - mu_base) * advantage[:, None]
 
-        loss_good = ppo_loss_gauss(mu_base, prec, mu_good, prec,
+        loss_good, pr_good = ppo_loss_gauss(mu_base, prec, mu_good, prec,
                                 critic_pred, action,
                                 advantage, value_target, eta)
-        loss_bad = ppo_loss_gauss(mu_base, prec, mu_bad, prec,
+        loss_bad, pr_bad = ppo_loss_gauss(mu_base, prec, mu_bad, prec,
                                 critic_pred, action,
                                 advantage, value_target, eta)
+        print(loss_good)
+        print(loss_bad)
         self.assertTrue(np.shape(loss_good.numpy()) == (8,))
         self.assertTrue(tf.math.reduce_mean(loss_good) < tf.math.reduce_mean(loss_bad))
 
@@ -187,3 +189,4 @@ if __name__ == "__main__":
     T = TestLosses()
     T.test_gauss_ratio()
     T.test_multiclass_loss()
+    T.test_gauss_loss()

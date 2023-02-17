@@ -217,20 +217,19 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
     return vf_scale * l_vf - l_clip + entropy_scale * negentropy
 
 
-def _gauss_prob_ratio(x: tf.Tensor,
-                      mu_num: tf.Tensor, prec_num: tf.Tensor,
-                      mu_denom: tf.Tensor, prec_denom: tf.Tensor):
+def _gauss_prob_ratio2(x: tf.Tensor,
+                       mu_num: tf.Tensor, prec_num: tf.Tensor,
+                       mu_denom: tf.Tensor, prec_denom: tf.Tensor):
     # num = numerator; denom = denominator; prec=precision
     # all shapes assumed to be batch_size x action_dims
     # det(var) for diagonal = product of diagonals
-    pre_term = tf.math.sqrt(tf.math.reduce_prod(tf.math.divide(prec_num, prec_denom), axis=1))
-    # inside the exponent
+    # NOTE: computes exp(log(gaussian ratios))
+    log_det = 0.5 * tf.math.reduce_sum(tf.math.log(prec_num) - tf.math.log(prec_denom), axis=1)
     diff_num = x - mu_num
-    v_num = tf.math.reduce_sum(diff_num * prec_num * diff_num, axis=1)
+    log_exp_num = (-0.5) * tf.math.reduce_sum(diff_num * prec_num * diff_num, axis=1)
     diff_denom = x - mu_denom
-    v_denom = tf.math.reduce_sum(diff_denom * prec_denom * diff_denom, axis=1)
-    exp_term = tf.math.exp(-0.5 * (v_num - v_denom))
-    return pre_term * exp_term
+    log_exp_denom = (-0.5) * tf.math.reduce_sum(diff_denom * prec_denom * diff_denom, axis=1)
+    return tf.math.exp(log_det + log_exp_num - log_exp_denom)
 
 
 def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
@@ -277,13 +276,15 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
             shape = batch_size
         tf.Tensor: prob ratio for each point
     """
-    prob_ratio = _gauss_prob_ratio(action,
-                                   pi_new_mu, pi_new_precision,
-                                   tf.stop_gradient(pi_old_mu),
-                                   tf.stop_gradient(pi_old_precision))
+    prob_ratio = _gauss_prob_ratio2(action,
+                                    pi_new_mu, pi_new_precision,
+                                    tf.stop_gradient(pi_old_mu),
+                                    tf.stop_gradient(pi_old_precision))
     l_clip = clipped_surrogate_likelihood(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
     # entropy for gaussian with diagonal covar = k * log(det(var))
-    #       = k * log(prod(1 / prec_i)) = -k2 * sum(prec_i)
-    neg_ent = tf.math.reduce_sum(pi_new_precision, axis=1)
+    #       = -k * log(det(prec))  [for diagonal case]
+    #       = -k * log(prod(prec)) = -k * sum(log(prec))
+    # --> neg entropy = error = k * sum(log(prec)) (low variance --> high precision --> high erro)
+    neg_ent = tf.math.reduce_sum(tf.math.log(pi_new_precision), axis=1)
     return vf_scale * l_vf - l_clip + entropy_scale * neg_ent, prob_ratio
