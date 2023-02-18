@@ -284,7 +284,9 @@ class PPOContinuous(Agent, TrainEpoch):
         self.kmodel = CustomModel("loss",
                                   inputs=inputs,
                                   outputs={"loss": tf.math.reduce_mean(loss),
-                                           "pr_ratio": pr_ratio})
+                                           "pr_ratio": pr_ratio,
+                                           "new_distro": pi_new_distro,
+                                           "old_distro": pi_old_distro})
         self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
         self.pi_new = pi_new
         self.pi_old = pi_old
@@ -336,7 +338,6 @@ class PPOContinuous(Agent, TrainEpoch):
         return sample
 
     def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
-        # TODO: tf.function?
         # TODO: move to function outside of class?
         # Returns: critic evals = List[np.ndarray]
         #               array for each trajectory
@@ -395,6 +396,7 @@ class PPOContinuous(Agent, TrainEpoch):
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
                                   verbose=0)
+
         # copy update actor to old actor
         copy_model(self.pi_new, self.pi_old, 1.)
         return history
