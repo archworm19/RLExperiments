@@ -1,3 +1,3 @@
 # overarching design for frameworks
-# > lowest level = tensors --> allows for more generalization
-# > next level = models with certain signatures --> more foolproof
+> lowest level = operations on tensors --> allows for more generalization
+> next level = operations on model signatures --> more foolproof
