@@ -100,7 +100,7 @@ class RunIface:
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
         # --> shape = num_actions
-        scores = model(action_t, state_t)
+        scores = model(action_t, state_t)[0]
 
         if debug:
             print('action; state; scores')
@@ -168,7 +168,7 @@ class RunIfaceCont:
         # NOTE: need to expand dims cuz unbatched
         state = [tf.expand_dims(si, 0) for si in state]
         # returns batch_size (1 here) x action_dims
-        a = model(state)[0].numpy()
+        a = model(state)[0][0].numpy()
         a_noise = self._noisify_and_clip(a).tolist()
         if debug:
             print(self.x_noise)
@@ -300,7 +300,7 @@ class QAgent(Agent, TrainOnLine):
         # unpack states in correct order:
         state_upack = [state[k][0] for k in self.s0_names]
         act_ind = self.run_iface.select_action(self.memory_model, state_upack,
-                                            test_mode=test_mode, debug=debug)
+                                               test_mode=test_mode, debug=debug)
         v = np.zeros((1, self.num_actions))
         v[0, act_ind] = 1.
         return v
@@ -310,7 +310,7 @@ class QAgent(Agent, TrainOnLine):
         #   approximation of updating the Q table
         # according to: memory <- tau * free + (1 - tau) * memory
         #   NOTE: tau should probably be pretty small
-        copy_model(self.free_model, self.memory_model, self.tau)
+        copy_model(self.free_model.layer, self.memory_model.layer, self.tau)
 
     def _draw_sample(self):
         d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
@@ -366,7 +366,7 @@ class QAgent(Agent, TrainOnLine):
         pass
 
 
-class ExpModel(ScalarModel):
+class ExpModel(Layer):
     # expectation model:
     # > wraps Distro Model
     # > Distro Model outputs unnormalized probabilities
@@ -396,7 +396,7 @@ class ExpModel(ScalarModel):
             tf.Tensor: shape = batch_size
         """
         # --> batch_size x dim
-        d = self.model(action_t, state_t)
+        d = self.model(action_t, state_t)[0]
         p = tf.nn.softmax(d, axis=1)
         q = _calc_q_from_distro(self.Vmin, self.Vmax, p)
         return q + tf.random.normal(tf.shape(q), stddev=self.r_std_dev)
@@ -428,8 +428,8 @@ class QAgent_distro(Agent, TrainOnLine):
         self.run_iface = run_iface
         self.free_model = model_builder()
         self.memory_model = model_builder()
-        self.exp_model = ExpModel(Vmin, Vmax, self.memory_model,
-                                  r_std_dev=0.0)
+        self.exp_model = ScalarModel(ExpModel(Vmin, Vmax, self.memory_model,
+                                     r_std_dev=0.0))
         self.num_actions = num_actions
         self.gamma = gamma
         self.tau = tau
@@ -518,7 +518,7 @@ class QAgent_distro(Agent, TrainOnLine):
         #   approximation of updating the Q table
         # according to: memory <- tau * free + (1 - tau) * memory
         #   NOTE: tau should probably be pretty small
-        copy_model(self.free_model, self.memory_model, self.tau)
+        copy_model(self.free_model.layer, self.memory_model.layer, self.tau)
 
     def _draw_sample(self):
         d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
@@ -703,8 +703,8 @@ class QAgent_cont(Agent):
         return np.array(act)[None]
 
     def _copy_model(self, debug: bool = False):
-        copy_model(self.q_model, self.qprime_model, self.tau)
-        copy_model(self.pi_model, self.piprime_model, self.tau)
+        copy_model(self.q_model.layer, self.qprime_model.layer, self.tau)
+        copy_model(self.pi_model.layer, self.piprime_model.layer, self.tau)
 
     def _draw_sample(self):
         d = self.mem_buffer.pull_sample(self.num_batch_sample * self.batch_size)
@@ -716,8 +716,8 @@ class QAgent_cont(Agent):
         with tf.GradientTape() as tape:
             loss = calc_q_error_actor(self.q_model, self.pi_model, state_t)
             # KEY: only differentiate wrt pi model's weights
-            g = tape.gradient(loss, self.pi_model.trainable_weights)
-        self.actor_opt.apply_gradients(zip(g, self.pi_model.trainable_weights))
+            g = tape.gradient(loss, self.pi_model.layer.trainable_weights)
+        self.actor_opt.apply_gradients(zip(g, self.pi_model.layer.trainable_weights))
 
     def train(self, debug: bool = False):
         """train agent on run data
