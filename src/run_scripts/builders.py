@@ -12,6 +12,7 @@ import tensorflow as tf
 from typing import Dict, List, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, DistroStateModel, VectorStateModel
 from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont, QAgent_distro
 from agents.ppo_agents import PPODiscrete, PPOContinuous
 from run_scripts.utils import DenseScalar, DenseScalarPi, DenseDistro, DenseScalarState, DenseDiscreteState, DenseGaussState
@@ -74,7 +75,7 @@ def build_discrete_q(env: EnvsDiscrete,
     # build the discrete q learning model
     rng = npr.default_rng(42)
     def build_q():
-        return DenseScalar([embed_dim] * 2, layer_sizes, drop_rate)
+        return ScalarModel(DenseScalar([embed_dim] * 2, layer_sizes, drop_rate))
     run_iface = RunIface(env.value.dims_actions, rng)
     agent = QAgent(run_iface,
                    build_q,
@@ -108,7 +109,7 @@ def build_discrete_q_atoms(env: EnvsDiscrete,
     num_actions = env.value.dims_actions
     rng = npr.default_rng(42)
     def build_q():
-        return DenseDistro([embed_dim], layer_sizes, drop_rate, num_atoms)
+        return DistroModel(DenseDistro([embed_dim], layer_sizes, drop_rate, num_atoms))
     run_iface = RunIface(num_actions, rng)
     ind0 = np.argmin(np.fabs(np.linspace(Vmin, Vmax, num_atoms)))
     v0 = [0] * num_atoms
@@ -150,10 +151,10 @@ def build_continuous_q(env: EnvsContinuous,
     action_bounds = env.value.action_bounds
     embed_dims = [embed_dim] * len(action_bounds)
     def build_q():
-        return DenseScalar(embed_dims, layer_sizes, drop_rate)
+        return ScalarModel(DenseScalar(embed_dims, layer_sizes, drop_rate))
     def build_pi():
-        return DenseScalarPi(len(action_bounds), embed_dims, layer_sizes, drop_rate,
-                             bounds=action_bounds)
+        return ScalarStateModel(DenseScalarPi(len(action_bounds), embed_dims, layer_sizes, drop_rate,
+                                              bounds=action_bounds))
     run_iface = RunIfaceCont(action_bounds,
                              [theta] * len(action_bounds),
                              [sigma] * len(action_bounds),
@@ -188,9 +189,9 @@ def build_discrete_ppo(env: EnvsDiscrete,
     # build environment
     env_run, env_disp = _build_env(env.value)
     def build_critic():
-        return DenseScalarState([embed_dim], layer_sizes, drop_rate)
+        return ScalarStateModel(DenseScalarState([embed_dim], layer_sizes, drop_rate))
     def build_pi():
-        return DenseDiscreteState(env.value.dims_actions, [embed_dim], layer_sizes, drop_rate)
+        return DistroStateModel(DenseDiscreteState(env.value.dims_actions, [embed_dim], layer_sizes, drop_rate))
     agent = PPODiscrete(build_pi, build_critic,
                         env.value.dims_actions, {"core_state": (env.value.dims_obs,)},
                         eta, vf_scale, entropy_scale, gamma, lam,
@@ -215,10 +216,10 @@ def build_continuous_ppo(env: EnvsContinuous,
     # build environment
     env_run, env_disp = _build_env(env.value)
     def build_critic():
-        return DenseScalarState([embed_dim], layer_sizes, drop_rate)
+        return ScalarStateModel(DenseScalarState([embed_dim], layer_sizes, drop_rate))
     def build_pi():
-        return DenseGaussState(env.value.action_bounds, [embed_dim], layer_sizes, drop_rate,
-                               init_prec=1. / init_var, min_prec=1. / init_var, max_prec=8.0)
+        return VectorStateModel(DenseGaussState(env.value.action_bounds, [embed_dim], layer_sizes, drop_rate,
+                               init_prec=1. / init_var, min_prec=1. / init_var, max_prec=8.0))
     agent = PPOContinuous(build_pi, build_critic,
                           env.value.action_bounds, {"core_state": (env.value.dims_obs,)},
                           eta, vf_scale, entropy_scale, gamma, lam,

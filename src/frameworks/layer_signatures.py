@@ -115,3 +115,25 @@ class DistroStateModel():
         v_test = tf.math.logical_and(tf.math.reduce_all(tf.shape(tf.shape(v)) == 2),
                                      tf.math.reduce_all(tf.math.abs(tf.math.reduce_sum(v, axis=1) - 1.) < .001))
         return v, v_test
+
+
+class VectorStateModel():
+    # distributional model
+
+    def __init__(self, layer: Layer):
+        self.layer = layer
+
+    def __call__(self, state_t: List[tf.Tensor]) -> Tuple[tf.Tensor, tf.Tensor]:
+        """
+        Args:
+            state_t (List[tf.Tensor]): set of states
+                each tensor is:
+                    batch_size x ...
+
+        Returns:
+            tf.Tensor: shape = batch_size x d
+            tf.Tensor: single boolean ~ true if tests pass
+        """
+        v = self.layer(state_t)
+        v_test = tf.math.reduce_all(tf.shape(tf.shape(v)) == 2)
+        return v, v_test

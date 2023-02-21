@@ -1,12 +1,12 @@
 """Sub-models used by model builders"""
 import tensorflow as tf
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Layer
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, DistroStateModel
 from arch_layers.simple_networks import DenseNetwork
 from typing import List, Tuple
 
 
-class DenseScalar(ScalarModel):
+class DenseScalar(Layer):
     # > run all states thru embeddings
     # > concat
     # > run thru dense network 
@@ -26,7 +26,7 @@ class DenseScalar(ScalarModel):
         return yp[:, 0]  # to scalar
 
 
-class DenseScalarState(ScalarStateModel):
+class DenseScalarState(Layer):
     # NOTE: unbounded outputs
     # > run all states thru embeddings
     # > concat
@@ -45,7 +45,7 @@ class DenseScalarState(ScalarStateModel):
         return yp[:, 0]  # to scalar
 
 
-class DenseScalarPi(ScalarStateModel):
+class DenseScalarPi(Layer):
     # TODO: wut? this isn't actually a scalar model!
     # pi: pi(a | s)
     def __init__(self,
@@ -75,7 +75,7 @@ class DenseScalarPi(ScalarStateModel):
         return self.activation(self.d_out(yp)) * self.ranges + self.offsets
 
 
-class DenseDistro(DistroModel):
+class DenseDistro(Layer):
     def __init__(self,
                  embed_dims: List[int],
                  layer_sizes: List[int],
@@ -95,7 +95,7 @@ class DenseDistro(DistroModel):
         return yp
 
 
-class DenseDiscreteState(DistroStateModel):
+class DenseDiscreteState(Layer):
     # softmaxed output
 
     def __init__(self,
@@ -113,7 +113,7 @@ class DenseDiscreteState(DistroStateModel):
         return tf.nn.softmax(yp, axis=1)
 
 
-class DenseGaussState(DistroStateModel):
+class DenseGaussState(Layer):
     # outputs means and precisions in a batch_size x (2 * action_dim) tensor
     # NOTE: variable precisions are not a function of inputs
 
