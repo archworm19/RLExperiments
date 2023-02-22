@@ -81,6 +81,9 @@ def _greedy_select(selection_model: ScalarModel,
         v = tf.tile(tf.expand_dims(v_hot, 0),
                     [tf.shape(state_t1[0])[0], 1])
         # qt1: shape = batch_size
+        print("wut?")
+        print(v)
+        print(state_t1)
         qt1 = selection_model(v, state_t1)
         qsels.append(qt1.tensor)
     # indices of greedily selected actions

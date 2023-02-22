@@ -4,6 +4,11 @@
     # tensor wrappers ~ pseudo dataclass
     #   > wraps tensor
     #   > provides check bit = indicates whether tensor has right properties
+
+    TODO/ISSUE:
+        this implementation doesn't work as currently constructed!
+        WHY? keras layers must output tensors!
+
     """
 import tensorflow as tf
 from typing import List

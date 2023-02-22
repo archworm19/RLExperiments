@@ -14,19 +14,12 @@ from frameworks.agent import Agent, TrainOnLine
 from frameworks.q_learning import (calc_q_error_sm, calc_q_error_critic, calc_q_error_actor,
                                    calc_q_error_distro_discrete, _calc_q_from_distro)
 from frameworks.custom_model import CustomModel
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, ScalarTensor
 from agents.utils import build_action_probes
 from replay_buffers.replay_buffs import MemoryBuffer
 
 
 # utils
-
-
-def _one_hot(x: np.ndarray, num_action: int):
-    # array of indices --> num_sample x num_action one-hot array
-    x_oh = np.zeros((np.shape(x)[0], num_action))
-    x_oh[np.arange(np.shape(x)[0]), x] = 1.
-    return x_oh
 
 
 def copy_model(send_model: Layer, rec_model: Layer,
@@ -100,7 +93,7 @@ class RunIface:
         # --> state_t = num_actions x ...
         action_t, state_t = build_action_probes(state, self.num_actions)
         # --> shape = num_actions
-        scores = model(action_t, state_t)
+        scores = model(action_t, state_t).tensor
 
         if debug:
             print('action; state; scores')
@@ -168,7 +161,7 @@ class RunIfaceCont:
         # NOTE: need to expand dims cuz unbatched
         state = [tf.expand_dims(si, 0) for si in state]
         # returns batch_size (1 here) x action_dims
-        a = model(state)[0].numpy()
+        a = model(state).tensor[0].numpy()
         a_noise = self._noisify_and_clip(a).tolist()
         if debug:
             print(self.x_noise)
@@ -383,7 +376,7 @@ class ExpModel(ScalarModel):
         self.model = distro_model
         self.r_std_dev = r_std_dev
 
-    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]) -> tf.Tensor:
+    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]) -> ScalarTensor:
         """
         Args:
             action_t (tf.Tensor): action
@@ -393,13 +386,13 @@ class ExpModel(ScalarModel):
                     batch_size x ...
 
         Returns:
-            tf.Tensor: shape = batch_size
+            ScalarTensor: shape = batch_size
         """
         # --> batch_size x dim
-        d = self.model(action_t, state_t)
+        d = self.model(action_t, state_t).tensor
         p = tf.nn.softmax(d, axis=1)
         q = _calc_q_from_distro(self.Vmin, self.Vmax, p)
-        return q + tf.random.normal(tf.shape(q), stddev=self.r_std_dev)
+        return ScalarTensor(q + tf.random.normal(tf.shape(q), stddev=self.r_std_dev))
 
 
 class QAgent_distro(Agent, TrainOnLine):
@@ -505,7 +498,7 @@ class QAgent_distro(Agent, TrainOnLine):
         if debug:
             print("p(atom_j | a, state_t) for all a")
             action_t, state_t = build_action_probes(state_upack, self.run_iface.num_actions)
-            prob = tf.nn.softmax(self.memory_model(action_t, state_t), axis=1).numpy()
+            prob = tf.nn.softmax(self.memory_model(action_t, state_t).tensor, axis=1).numpy()
             print(np.round(prob, decimals=2))
         act_ind = self.run_iface.select_action(self.exp_model, state_upack,
                                             test_mode=test_mode, debug=debug)
