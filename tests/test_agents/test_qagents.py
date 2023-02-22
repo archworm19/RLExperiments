@@ -4,7 +4,7 @@ import numpy.random as npr
 import tensorflow as tf
 from typing import List, Tuple
 from unittest import TestCase
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Layer
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont, QAgent_distro
 from arch_layers.simple_networks import DenseNetwork
@@ -16,7 +16,7 @@ def _one_hot(x: np.ndarray, num_action: int):
     return np.concatenate([vi[:, None] for vi in v], axis=1)
 
 
-class DenseScalar(ScalarModel):
+class DenseScalar(Layer):
     # simple scalar model
     def __init__(self):
         super(DenseScalar, self).__init__()
@@ -31,7 +31,7 @@ class DenseScalar(ScalarModel):
         return yp[:, 0]  # to scalar
 
 
-class DenseScalarPi(ScalarStateModel):
+class DenseScalarPi(Layer):
     # pi: pi(a | s)
     def __init__(self,
                  bounds: List[Tuple],
@@ -54,7 +54,7 @@ class DenseScalarPi(ScalarStateModel):
         return (self.ranges * tf.math.sigmoid(raw_act)) + self.offset
 
 
-class DenseDistro(DistroModel):
+class DenseDistro(Layer):
     def __init__(self, num_atoms: int = 5):
         super(DenseDistro, self).__init__()
         self.d_act = Dense(4)
@@ -131,7 +131,7 @@ class TestDQN(TestCase):
         rng = npr.default_rng(42)
         run_iface = RunIface(2, rng)
         def q_builder():
-            return DenseScalar()
+            return ScalarModel(DenseScalar())
         self.QA = QAgent(run_iface,
                          q_builder,
                          rng,
@@ -183,7 +183,7 @@ class TestDQN(TestCase):
 
         for v in self.QA._draw_sample().batch(32):
             rews = v["reward"].numpy()
-            q = self.QA.memory_model(v["action"], [v["state"]]).numpy()
+            q = self.QA.memory_model(v["action"], [v["state"]])[0].numpy()
             q_rew = np.mean(q[rews >= 0.5])
             q_no = np.mean(q[rews <= 0.5])
             self.assertAlmostEqual(exp_q, q_rew, places=1)
@@ -197,7 +197,7 @@ class TestDQNdistro(TestCase):
         rng = npr.default_rng(42)
         run_iface = RunIface(2, rng)
         def q_builder():
-            return DenseDistro(21)
+            return DistroModel(DenseDistro(21))
         # assumes 21 atoms
         vector0 = tf.constant([0] * 10 + [1] + [0] * 10, tf.float32)
         self.Vmax = 10.
@@ -239,7 +239,7 @@ class TestDQNdistro(TestCase):
         #       assuming high enough gamma --> expected reward approaches Vmax
         for v in self.QA._draw_sample().batch(32):
             # test model expectation
-            exp_q = self.QA.exp_model(v["action"], [v["state"]])
+            exp_q = self.QA.exp_model(v["action"], [v["state"]])[0]
             self.assertTrue(tf.math.reduce_all(tf.math.abs(self.Vmax - exp_q) < 1.5))
             break
 
@@ -258,7 +258,7 @@ class TestDQNdistro(TestCase):
         for v in self.QA._draw_sample().batch(32):
             # test model expectation
             sum_state = tf.math.reduce_sum(v["state"], axis=1)
-            exp_q = self.QA.exp_model(v["action"], [v["state"]])
+            exp_q = self.QA.exp_model(v["action"], [v["state"]])[0]
             term_states = tf.cast(sum_state < 0, tf.float32)
             termq = tf.divide(tf.math.reduce_sum(term_states * exp_q),
                               tf.math.reduce_sum(term_states))
@@ -277,9 +277,9 @@ class TestDQNcont(TestCase):
         run_iface = RunIfaceCont(bounds, [0.15] * len(bounds),
                                  [0.2] * len(bounds), rng)
         def q_builder():
-            return DenseScalar()
+            return ScalarModel(DenseScalar())
         def pi_builder():
-            return DenseScalarPi(bounds, 4, [4], 0.)
+            return ScalarStateModel(DenseScalarPi(bounds, 4, [4], 0.))
         self.state_dims = 3
         self.QA = QAgent_cont(run_iface, q_builder, pi_builder,
                               rng, bounds,
@@ -328,14 +328,14 @@ class TestDQNcont(TestCase):
         #   1. Q(pi, state_t), 2. r + gamma * Q(pi, state_t1)
         for v in self.QA._draw_sample().batch(32):
             # action calc
-            act = self.QA.piprime_model([v["state"]])
+            act = self.QA.piprime_model([v["state"]])[0]
             self.assertTrue(tf.math.reduce_all(act >= 0.95))
 
             # q calc ~ this is basically just testing whether
             # q loss in model is calculated correctly
-            q = self.QA.qprime_model(v["action"], [v["state"]])
-            act_t1 = self.QA.piprime_model([v["statet1"]])
-            q_t1 = self.QA.qprime_model(act_t1, [v["statet1"]])
+            q = self.QA.qprime_model(v["action"], [v["state"]])[0]
+            act_t1 = self.QA.piprime_model([v["statet1"]])[0]
+            q_t1 = self.QA.qprime_model(act_t1, [v["statet1"]])[0]
             target = tf.cast(v["reward"], q_t1.dtype) + self.QA.gamma * q_t1
             self.assertTrue(tf.math.reduce_mean(tf.math.pow(target - q, 2.)) < .2)
             break
@@ -354,14 +354,14 @@ class TestDQNcont(TestCase):
         for v in self.QA._draw_sample().batch(128):
             # action calc
             s = tf.math.reduce_sum(v["state"], axis=1)
-            act = tf.math.reduce_sum(self.QA.piprime_model([v["state"]]), axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["state"]])[0], axis=1)
             # state - action correlation ~ should be high
             corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
             self.assertTrue(corr.numpy() > 0.3)
 
             # correlation with s(t+1)? shouldn't be
             s = tf.math.reduce_sum(v["state"], axis=1)
-            act = tf.math.reduce_sum(self.QA.piprime_model([v["statet1"]]), axis=1)
+            act = tf.math.reduce_sum(self.QA.piprime_model([v["statet1"]])[0], axis=1)
             corr = tf.math.reduce_mean(s * tf.cast(act, s.dtype))
             self.assertTrue(corr.numpy() < 0.3)
             break

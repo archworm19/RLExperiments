@@ -3,7 +3,7 @@ import numpy.random as npr
 import tensorflow as tf
 from typing import List
 from unittest import TestCase
-from tensorflow.keras.layers import Dense
+from tensorflow.keras.layers import Dense, Layer
 from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error_huber,
                                    calc_q_error_critic, calc_q_error_actor,
                                    _redistribute_weight, _calc_q_from_distro,
@@ -11,7 +11,7 @@ from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error
 from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
 
 
-class AModel(ScalarModel):
+class AModel(Layer):
     # returns action_t[:, target_idx]
 
     def __init__(self, target_idx: int):
@@ -37,8 +37,8 @@ class TestHuber(TestCase):
 class TestQL(TestCase):
 
     def setUp(self) -> None:
-        self.model0 = AModel(0)
-        self.model1 = AModel(1)
+        self.model0 = ScalarModel(AModel(0))
+        self.model1 = ScalarModel(AModel(1))
 
     def test_greedy_select(self):
         state_t1 = tf.constant([[1., 2.],
@@ -99,7 +99,7 @@ class TestQL(TestCase):
                                            tf.round(100 * 0.)))
 
 
-class QModel(ScalarModel):
+class QModel(Layer):
 
     def __init__(self):
         super(QModel, self).__init__()
@@ -110,7 +110,7 @@ class QModel(ScalarModel):
         return action + state[0]
 
 
-class PiModel(ScalarStateModel):
+class PiModel(Layer):
     # returns action_t[:, target_idx]
 
     def __init__(self):
@@ -124,8 +124,8 @@ class PiModel(ScalarStateModel):
 class TestQLcont(TestCase):
 
     def setUp(self) -> None:
-        self.Q = QModel()
-        self.pi = PiModel()
+        self.Q = ScalarModel(QModel())
+        self.pi = ScalarStateModel(PiModel())
 
     def test_positive_control(self):
         # def: Q(pi, s) = r + gamma * Q(pi, s)
@@ -136,8 +136,8 @@ class TestQLcont(TestCase):
         r = tf.random.uniform([batch_size])
         term = tf.zeros([batch_size])
         gamma = 0.85
-        a = self.pi([s])
-        Qval = self.Q(self.pi([s]), [s])
+        a = self.pi([s])[0]
+        Qval = self.Q(self.pi([s])[0], [s])[0]
         err, Y_t = calc_q_error_critic(self.Q, self.Q, self.pi, a,
                                      r, [s], [s], term, gamma, huber=False)
         target = tf.pow(Qval * (1. - gamma) - r, 2.)
@@ -153,8 +153,8 @@ class TestQLcont(TestCase):
         r = tf.random.uniform([batch_size])
         term = tf.zeros([batch_size])
         gamma = 0.85
-        a = self.pi([s])
-        Qval = self.Q(self.pi([s]), [s])
+        a = self.pi([s])[0]
+        Qval = self.Q(self.pi([s])[0], [s])[0]
         err, Y_t = calc_q_error_critic(self.Q, self.Q, self.pi, a,
                                        r, [s], [s_t1], term, gamma, huber=False)
         target = tf.pow(Qval * (1. - gamma) - r, 2.)
@@ -166,15 +166,15 @@ class TestQLcont(TestCase):
         batch_size = 8
         s = tf.random.uniform([batch_size])
         # build weights:
-        _ = self.Q(self.pi([s]), [s])
+        _ = self.Q(self.pi([s])[0], [s])[0]
         Q0 = -1 * calc_q_error_actor(self.Q, self.pi, [s])
         # gradient ascent for a few steps:
         opt = tf.keras.optimizers.SGD(0.1)
         for _ in range(10):
             with tf.GradientTape() as tape:
                 loss = calc_q_error_actor(self.Q, self.pi, [s])
-            g = tape.gradient(loss, self.pi.trainable_weights)
-            opt.apply_gradients(zip(g, self.pi.trainable_weights))
+            g = tape.gradient(loss, self.pi.layer.trainable_weights)
+            opt.apply_gradients(zip(g, self.pi.layer.trainable_weights))
         Qfin = -1 * calc_q_error_actor(self.Q, self.pi, [s])
         self.assertTrue(Qfin > Q0)
 
@@ -285,7 +285,7 @@ class TestDistroQ(TestCase):
                                       tf.round(100. * tf.constant([1., 1.], dtype=tf.float32))))
 
 
-class QModelUniformD(DistroModel):
+class QModelUniformD(Layer):
     # returns constant K
 
     def __init__(self, num_atoms: int = 5, K: int = 1.):
@@ -298,7 +298,7 @@ class QModelUniformD(DistroModel):
         return tf.tile(self.v, [tf.shape(action)[0], 1])
 
 
-class QModelConstantD(DistroModel):
+class QModelConstantD(Layer):
     # returns specified vector v tiled to correct shape
 
     def __init__(self, v: tf.Tensor):
@@ -310,7 +310,7 @@ class QModelConstantD(DistroModel):
         return tf.tile(self.v, [tf.shape(action)[0], 1])
 
 
-class expQDist(ScalarModel):
+class expQDist(Layer):
     # expectation across a distro model
 
     def __init__(self, qdist: QModelUniformD, Vmin: float, Vmax: float):
@@ -333,10 +333,10 @@ class TestDistroQdiscrete(TestCase):
         # weights proportional to probs?
         num_atoms = 11
         gamma = 1.
-        Q = QModelUniformD(num_atoms)
+        Q = DistroModel(QModelUniformD(num_atoms))
         Vmin = -10.
         Vmax = 10.
-        Qexp = expQDist(Q, Vmin, Vmax)
+        Qexp = ScalarModel(expQDist(Q.layer, Vmin, Vmax))
         action = tf.constant([[1, 0, 0, 0],
                               [0, 1, 0, 0]], tf.float32)
         reward = tf.constant([0., 0.], tf.float32)
@@ -364,10 +364,10 @@ class TestDistroQdiscrete(TestCase):
         # shift atoms over N using reward (keep gamma constant at 1)
         num_atoms = 11
         gamma = 1.
-        Q = QModelUniformD(num_atoms)
+        Q = DistroModel(QModelUniformD(num_atoms))
         Vmin = -10.
         Vmax = 10.
-        Qexp = expQDist(Q, Vmin, Vmax)
+        Qexp = ScalarModel(expQDist(Q.layer, Vmin, Vmax))
         action = tf.constant([[1, 0, 0, 0],
                               [0, 1, 0, 0]], tf.float32)
         state = [tf.constant([0., 0.], tf.float32)]
@@ -410,10 +410,10 @@ class TestDistroQdiscrete(TestCase):
         v0 = [0] * num_atoms
         v0[6] = 1
         vector0 = tf.constant(v0, tf.float32)
-        Q = QModelConstantD(vector0)
+        Q = DistroModel(QModelConstantD(vector0))
         Vmin = -10.
         Vmax = 10.
-        Qexp = expQDist(Q, Vmin, Vmax)
+        Qexp = ScalarModel(expQDist(Q.layer, Vmin, Vmax))
         action = tf.constant([[1, 0, 0, 0],
                               [1, 0, 0, 0]], tf.float32)
         reward = tf.constant([0., 0.], tf.float32)
@@ -444,10 +444,10 @@ class TestDistroQdiscrete(TestCase):
         v0 = [0] * num_atoms
         v0[25] = 1
         vector0 = tf.constant(v0, tf.float32)
-        Q = QModelConstantD(vector0)
+        Q = DistroModel(QModelConstantD(vector0))
         Vmin = -10.
         Vmax = 10.
-        Qexp = expQDist(Q, Vmin, Vmax)
+        Qexp = ScalarModel(expQDist(Q.layer, Vmin, Vmax))
         for i in range(5):
             action = tf.random.uniform([2, 4], -1.0, 1.0)
             reward = tf.random.uniform([2], -1.0, 1.0, seed=i)

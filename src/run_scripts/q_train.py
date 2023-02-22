@@ -50,7 +50,7 @@ def run_and_train(env_run,  # TODO: object type?
 
 if __name__ == "__main__":
     # cartpole:
-    # env_run, env_disp, agent = build_discrete_q(EnvsDiscrete.cartpole)
+    env_run, env_disp, agent = build_discrete_q(EnvsDiscrete.cartpole)
     # run_and_train(env_run, env_disp, agent, run_length=EnvsDiscrete.cartpole.value.run_length, seed_runs=10, discrete=True, debug_viz=False)
     # lunar lander:
     # env_run, env_disp, agent = build_discrete_q(EnvsDiscrete.lunar)
@@ -58,14 +58,14 @@ if __name__ == "__main__":
     #               timeout=False, debug_viz=False)
 
     # cartpole + C51:
-    # env_run, env_disp, agent = build_discrete_q_atoms(EnvsDiscrete.cartpole, Vmin=0., Vmax=1000.)
-    # run_and_train(env_run, env_disp, agent, run_length=EnvsDiscrete.cartpole.value.run_length, seed_runs=10,
-    #               debug_viz=False, discrete=True)
+    env_run, env_disp, agent = build_discrete_q_atoms(EnvsDiscrete.cartpole, Vmin=0., Vmax=1000.)
+    run_and_train(env_run, env_disp, agent, run_length=EnvsDiscrete.cartpole.value.run_length, seed_runs=10,
+                  debug_viz=False, discrete=True)
 
     # pendulum + continuous DQN
-    env_run, env_disp, agent = build_continuous_q(EnvsContinuous.pendulum)
-    run_and_train(env_run, env_disp, agent, run_length=EnvsContinuous.pendulum.value.run_length, seed_runs=10,
-                  debug_viz=False, discrete=False)
+    # env_run, env_disp, agent = build_continuous_q(EnvsContinuous.pendulum)
+    # run_and_train(env_run, env_disp, agent, run_length=EnvsContinuous.pendulum.value.run_length, seed_runs=10,
+    #               debug_viz=False, discrete=False)
 
     # walker + continuous DQN
     # env_run, env_disp, agent = build_continuous_q(EnvsContinuous.bi_walker, embed_dim=8, layer_sizes=[256, 128],

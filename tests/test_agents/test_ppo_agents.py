@@ -4,8 +4,8 @@ import numpy.random as npr
 import tensorflow as tf
 from typing import List, Dict
 from unittest import TestCase
-from tensorflow.keras.layers import Dense
-from frameworks.layer_signatures import ScalarStateModel, DistroStateModel
+from tensorflow.keras.layers import Dense, Layer
+from frameworks.layer_signatures import ScalarStateModel, VectorStateModel, DistroStateModel
 from agents.ppo_agents import PPODiscrete, PPOContinuous
 
 
@@ -39,7 +39,7 @@ def fake_reward_statecorr(state: Dict[str, np.ndarray], action: np.ndarray,
 # models
 
 
-class DistroMod(DistroStateModel):
+class DistroMod(Layer):
     def __init__(self, num_actions: int, num_states: int):
         super(DistroMod, self).__init__()
         self.layers = [Dense(num_actions) for _ in range(num_states)]
@@ -49,7 +49,7 @@ class DistroMod(DistroStateModel):
         return tf.nn.softmax(tf.add_n(v), axis=1)
 
 
-class DistroGauss(DistroStateModel):
+class DistroGauss(Layer):
     def __init__(self, num_actions: int, num_states: int):
         super(DistroGauss, self).__init__()
         self.num_actions = num_actions  # action dimensions
@@ -66,7 +66,7 @@ class DistroGauss(DistroStateModel):
         return tf.concat([mu, prec], axis=1)
 
 
-class Critic(ScalarStateModel):
+class Critic(Layer):
     def __init__(self, num_states: int):
         super(Critic, self).__init__()
         self.layers = [Dense(1) for _ in range(num_states)]
@@ -82,8 +82,8 @@ class TestDiscreteAgent(TestCase):
         self.rng = npr.default_rng(42)
         num_actions = 3
         state_dims = {"s1": (3,), "s2": (5,)}
-        self.agent = PPODiscrete(lambda: DistroMod(num_actions, len(state_dims)),
-                                 lambda: Critic(len(state_dims)),
+        self.agent = PPODiscrete(lambda: DistroStateModel(DistroMod(num_actions, len(state_dims))),
+                                 lambda: ScalarStateModel(Critic(len(state_dims))),
                                  num_actions, state_dims,
                                  entropy_scale=0.0,
                                  eta=0.3,
@@ -136,8 +136,8 @@ class TestContinuousAgent(TestCase):
         self.rng = npr.default_rng(42)
         action_bounds = [(-10, 10) for _ in range(3)]
         state_dims = {"s1": (3,), "s2": (5,)}
-        self.agent = PPOContinuous(lambda: DistroGauss(len(action_bounds), len(state_dims)),
-                                   lambda: Critic(len(state_dims)),
+        self.agent = PPOContinuous(lambda: VectorStateModel(DistroGauss(len(action_bounds), len(state_dims))),
+                                   lambda: ScalarStateModel(Critic(len(state_dims))),
                                    action_bounds, state_dims,
                                    entropy_scale=0.0,
                                    eta=0.3,
