@@ -8,7 +8,7 @@ from frameworks.q_learning import (calc_q_error_sm, _greedy_select, calc_q_error
                                    calc_q_error_critic, calc_q_error_actor,
                                    _redistribute_weight, _calc_q_from_distro,
                                    calc_q_error_distro_discrete)
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, ScalarTensor, VectorTensor, DistroTensor
 
 
 class AModel(ScalarModel):
@@ -19,7 +19,7 @@ class AModel(ScalarModel):
         self.target_idx = target_idx
 
     def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
-        return action_t[:, self.target_idx]
+        return ScalarTensor(action_t[:, self.target_idx])
 
 
 class TestHuber(TestCase):
@@ -107,7 +107,7 @@ class QModel(ScalarModel):
     def call(self, action: tf.Tensor, state: List[tf.Tensor]):
         # assumes: state and action space have same dimensionality
         # both are batch_size x ...
-        return action + state[0]
+        return ScalarTensor(action + state[0])
 
 
 class PiModel(ScalarStateModel):
@@ -118,7 +118,7 @@ class PiModel(ScalarStateModel):
         self.d = Dense(1)
 
     def call(self, state_t: List[tf.Tensor]):
-        return self.d(tf.expand_dims(state_t[0], 0))[:,0]
+        return ScalarTensor(self.d(tf.expand_dims(state_t[0], 0))[:,0])
 
 
 class TestQLcont(TestCase):
@@ -136,8 +136,8 @@ class TestQLcont(TestCase):
         r = tf.random.uniform([batch_size])
         term = tf.zeros([batch_size])
         gamma = 0.85
-        a = self.pi([s])
-        Qval = self.Q(self.pi([s]), [s])
+        a = self.pi([s]).tensor
+        Qval = self.Q(self.pi([s]).tensor, [s]).tensor
         err, Y_t = calc_q_error_critic(self.Q, self.Q, self.pi, a,
                                      r, [s], [s], term, gamma, huber=False)
         target = tf.pow(Qval * (1. - gamma) - r, 2.)
@@ -153,8 +153,8 @@ class TestQLcont(TestCase):
         r = tf.random.uniform([batch_size])
         term = tf.zeros([batch_size])
         gamma = 0.85
-        a = self.pi([s])
-        Qval = self.Q(self.pi([s]), [s])
+        a = self.pi([s]).tensor
+        Qval = self.Q(self.pi([s]).tensor, [s]).tensor
         err, Y_t = calc_q_error_critic(self.Q, self.Q, self.pi, a,
                                        r, [s], [s_t1], term, gamma, huber=False)
         target = tf.pow(Qval * (1. - gamma) - r, 2.)
@@ -166,7 +166,7 @@ class TestQLcont(TestCase):
         batch_size = 8
         s = tf.random.uniform([batch_size])
         # build weights:
-        _ = self.Q(self.pi([s]), [s])
+        _ = self.Q(self.pi([s]).tensor, [s])
         Q0 = -1 * calc_q_error_actor(self.Q, self.pi, [s])
         # gradient ascent for a few steps:
         opt = tf.keras.optimizers.SGD(0.1)
@@ -295,7 +295,7 @@ class QModelUniformD(DistroModel):
 
     def call(self, action: tf.Tensor, state: List[tf.Tensor]):
         # --> batch_size x num_atoms
-        return tf.tile(self.v, [tf.shape(action)[0], 1])
+        return DistroTensor(tf.tile(self.v, [tf.shape(action)[0], 1]))
 
 
 class QModelConstantD(DistroModel):
@@ -307,7 +307,7 @@ class QModelConstantD(DistroModel):
 
     def call(self, action: tf.Tensor, state: List[tf.Tensor]):
         # --> batch_size x num_atoms
-        return tf.tile(self.v, [tf.shape(action)[0], 1])
+        return DistroTensor(tf.tile(self.v, [tf.shape(action)[0], 1]))
 
 
 class expQDist(ScalarModel):
@@ -320,9 +320,9 @@ class expQDist(ScalarModel):
         self.qdist = qdist
 
     def call(self, action: tf.Tensor, state: List[tf.Tensor]):
-        v = self.qdist(action, state)
+        v = self.qdist(action, state).tensor
         atom_probs = tf.nn.softmax(v, axis=1)
-        return _calc_q_from_distro(self.Vmin, self.Vmax, atom_probs)
+        return ScalarTensor(_calc_q_from_distro(self.Vmin, self.Vmax, atom_probs))
 
 
 class TestDistroQdiscrete(TestCase):

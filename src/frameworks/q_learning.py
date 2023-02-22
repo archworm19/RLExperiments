@@ -82,7 +82,7 @@ def _greedy_select(selection_model: ScalarModel,
                     [tf.shape(state_t1[0])[0], 1])
         # qt1: shape = batch_size
         qt1 = selection_model(v, state_t1)
-        qsels.append(qt1)
+        qsels.append(qt1.tensor)
     # indices of greedily selected actions
     # --> shape = batch_size
     qsels = tf.stack(qsels, axis=1)
@@ -143,15 +143,16 @@ def calc_q_error_sm(q_model: ScalarModel,
     """
     max_a, _ = _greedy_select(selection_model, num_action, state_t1)
     # evaluate --> max_a[ Q(t+1) ] using eval model
-    max_q_t1 = tf.stop_gradient(eval_model(tf.one_hot(max_a, num_action), state_t1))
+    _mqt = eval_model(tf.one_hot(max_a, num_action), state_t1)
+    max_q_t1 = tf.stop_gradient(_mqt.tensor)
     # termination:
     # if not term --> max_a[ Q(t+1)]
     # else --> 0
     max_q_t1 = (1. - termination) * max_q_t1
     q_t = q_model(action_t, state_t)
     if huber:
-        return calc_q_error_huber(q_t, max_q_t1, reward_t1, gamma)
-    return calc_q_error(q_t, max_q_t1, reward_t1, gamma)
+        return calc_q_error_huber(q_t.tensor, max_q_t1, reward_t1, gamma)
+    return calc_q_error(q_t.tensor, max_q_t1, reward_t1, gamma)
 
 
 def calc_q_error_critic(q_model: ScalarModel,
@@ -203,10 +204,10 @@ def calc_q_error_critic(q_model: ScalarModel,
             both have shape = batch_size
     """
     # Q
-    Qval = q_model(action_t, state_t)
+    Qval = q_model(action_t, state_t).tensor
     # Q'(state_t1, pi(state_t1))
-    Q_prime = tf.stop_gradient(qprime_model(piprime_model(state_t1),
-                                            state_t1))
+    Q_prime = tf.stop_gradient(qprime_model(piprime_model(state_t1).tensor,
+                                            state_t1).tensor)
     # termination:
     # if not term --> Q'
     # else --> 0
@@ -238,7 +239,7 @@ def calc_q_error_actor(q_model: ScalarModel,
     Returns:
         tf.Tensor: -1 * Q() ~ scalar
     """
-    return -1. * tf.math.reduce_mean(q_model(pi_model(state_t), state_t))
+    return -1. * tf.math.reduce_mean(q_model(pi_model(state_t).tensor, state_t).tensor)
 
 
 # Distributional Approach
@@ -428,7 +429,7 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     term_exp = tf.expand_dims(termination, axis=1)
     v0_exp = tf.expand_dims(vector0, axis=0)
     atoms_probs_target = (term_exp * v0_exp +
-                          (1.0 - term_exp) * tf.nn.softmax(tf.stop_gradient(eval_model(max_a_vector, state_t1)),
+                          (1.0 - term_exp) * tf.nn.softmax(tf.stop_gradient(eval_model(max_a_vector, state_t1).tensor),
                                                               axis=1))
     weights = _redistribute_weight(Vmin, Vmax, atoms_probs_target, reward_t1, gamma)
 
@@ -440,6 +441,6 @@ def calc_q_error_distro_discrete(q_model: DistroModel,
     #       = - sum_i [w_i * v_i - w_i * log_sum_exp(V)]
     #       = - sum_i [w_i * v_i] + log_sum_exp(V) sum_i [w_i]
     #       = log_sum_exp(V) - sum_i [ w_i * v_i]
-    atoms_v_q = q_model(action_t, state_t)
+    atoms_v_q = q_model(action_t, state_t).tensor
     return (tf.math.reduce_logsumexp(atoms_v_q, axis=1) -
             tf.math.reduce_sum(weights * atoms_v_q, axis=1)), weights, max_a_vector
