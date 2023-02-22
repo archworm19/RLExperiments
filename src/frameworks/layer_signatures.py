@@ -111,33 +111,6 @@ class DistroStateModel():
                 where d = number of elements representing distribution
             tf.Tensor: single boolean ~ true if tests pass
         """
-<<<<<<< HEAD
-        pass
-
-
-class MapperModel(Layer):
-    def __init__(self):
-        super(MapperModel, self).__init__()
-
-    def call(self, x: tf.Tensor) -> tf.Tensor:
-        """
-        Args:
-            x (tf.Tensor): batch_size x d1
-
-        Returns:
-            tf.Tensor: shape = batch_size x d2
-        """
-        pass
-
-
-class VectorStateModel(Layer):
-    # map states to continuous space
-
-    def __init__(self):
-        super(VectorStateModel, self).__init__()
-
-    def call(self, state_t: List[tf.Tensor]) -> tf.Tensor:
-=======
         v = self.layer(state_t)
         v_test = tf.math.logical_and(tf.math.reduce_all(tf.shape(tf.shape(v)) == 2),
                                      tf.math.reduce_all(tf.math.abs(tf.math.reduce_sum(v, axis=1) - 1.) < .001))
@@ -151,7 +124,6 @@ class VectorStateModel():
         self.layer = layer
 
     def __call__(self, state_t: List[tf.Tensor]) -> Tuple[tf.Tensor, tf.Tensor]:
->>>>>>> main
         """
         Args:
             state_t (List[tf.Tensor]): set of states
@@ -160,13 +132,29 @@ class VectorStateModel():
 
         Returns:
             tf.Tensor: shape = batch_size x d
-<<<<<<< HEAD
-        """
-        pass
-=======
             tf.Tensor: single boolean ~ true if tests pass
         """
         v = self.layer(state_t)
         v_test = tf.math.reduce_all(tf.shape(tf.shape(v)) == 2)
         return v, v_test
->>>>>>> main
+
+
+class MapperModel():
+    # layer must implement:
+    #   x --> y (2 continuous tensors)
+
+    def __init__(self, layer: Layer):
+        self.layer = layer
+
+    def __call__(self, x: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
+        """
+        Args:
+            x (tf.Tensor): batch_size x d1
+
+        Returns:
+            tf.Tensor: shape = batch_size x d2
+            tf.Tensor: single boolean ~ true if tests pass
+        """
+        v = self.layer(x)
+        v_test = tf.math.reduce_all(tf.shape(tf.shape(v)) == 2)
+        return v, v_test
