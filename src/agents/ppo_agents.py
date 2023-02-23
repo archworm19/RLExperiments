@@ -2,7 +2,6 @@
 import os
 import numpy as np
 import numpy.random as npr
-from src.frameworks.exploration_forward import forward_surprisal, inverse_dynamics_error
 import tensorflow as tf
 from typing import List, Tuple, Callable, Dict
 from tensorflow.keras import Model
@@ -10,7 +9,11 @@ from tensorflow.keras.layers import Layer, Dense
 from frameworks.layer_signatures import DistroStateModel, ScalarStateModel, VectorStateModel, VectorModel, MapperModel
 from frameworks.agent import Agent, TrainEpoch, WeightMate
 from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss
+from frameworks.exploration_forward import forward_surprisal, inverse_dynamics_error
 from frameworks.custom_model import CustomModel
+
+
+# shared utilities
 
 
 def copy_model(send_model: Layer, rec_model: Layer,
@@ -23,6 +26,65 @@ def copy_model(send_model: Layer, rec_model: Layer,
     for send, rec in zip(send_weights, rec_weights):
         new_weights.append(tau * send + (1 - tau) * rec)
     rec_model.set_weights(new_weights)
+
+
+def test_layersigs(test_model, dset: tf.data.Dataset):
+    # ensures that all test bits output by test_model are true
+    for v in dset.batch(16):
+        vout = test_model(v)
+        for k in vout:
+            assert vout[k].numpy()
+        break
+
+
+def calculate_v(critic_model,
+                states: List[Dict[str, np.ndarray]],
+                state_names: List[str]):
+    # V = value = estimate reward over horizon
+    # Returns: critic evals = List[np.ndarray]
+    #               array for each trajectory
+    V = []
+    # iter thru trajectories:
+    for traj in states:
+        V_traj = []
+        # iter thru windows within a trajectory:
+        for win_start in range(0, np.shape(traj[state_names[0]])[0], 32):
+            # uses state_names to sync ordering
+            state_wins = [traj[k][win_start:win_start+32] for k in state_names]
+            V_traj.append(critic_model(state_wins)[0].numpy())
+        V.append(np.concatenate(V_traj, axis=0))
+    return V
+
+
+def filter_short_trajs(traj0: List, trajs: List, min_length: int = 5):
+    # filter out short trajectories
+    # NOTE: uses 
+    ret_trajs = [[] for _ in range(1 + len(trajs))]
+    for i in range(len(traj0)):
+        if np.shape(traj0[i])[0] > min_length:
+            ret_trajs[0].append(traj0[i])
+            for j in range(1, len(ret_trajs)):
+                ret_trajs[j].append(trajs[j-1][i])
+    return ret_trajs
+
+
+def save_weights(pi_new_model, critic_model, directory_location: str):
+    # get_weights --> List[np.ndarray]
+    np.savez(os.path.join(directory_location, "actor_weights.npz"), *pi_new_model.layer.get_weights())
+    np.savez(os.path.join(directory_location, "critic_weights.npz"), *critic_model.layer.get_weights())
+
+
+def load_weights(pi_new_model, pi_old_model, critic_model, directory_location: str):
+    d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
+    actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
+    pi_new_model.layer.set_weights(actor_weights)
+    pi_old_model.layer.set_weights(actor_weights)  # TODO: necessary?
+    d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
+    critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
+    critic_model.layer.set_weights(critic_weights)
+
+
+# models
 
 
 class PPODiscrete(Agent, TrainEpoch, WeightMate):
@@ -143,30 +205,6 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         v = boolz * 1.
         return np.hstack((v[:,:1], v[:,1:] - v[:,:-1]))
 
-    def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
-        # TODO: tf.function?
-        # Returns: critic evals = List[np.ndarray]
-        #               array for each trajectory
-        V = []
-        # iter thru trajectories:
-        for traj in states:
-            V_traj = []
-            # iter thru windows within a trajectory:
-            for win_start in range(0, np.shape(traj[self._sname0])[0], 32):
-                # uses self.state_names to sync ordering
-                state_wins = [traj[k][win_start:win_start+32] for k in self.state_names]
-                V_traj.append(self.critic(state_wins)[0].numpy())
-            V.append(np.concatenate(V_traj, axis=0))
-        return V
-
-    def _test_layersigs(self, dset: tf.data.Dataset):
-        for v in dset.batch(16):
-            vout = self.test_model(v)
-            for k in vout:
-                assert vout[k].numpy()
-            break
-        self.lsig_test = True
-
     def train(self,
               states: List[Dict[str, np.ndarray]],
               reward: List[np.ndarray],
@@ -194,19 +232,14 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
             Dict: loss history
         """
         # filter out short trajectories
-        states2, actions2, rewards2, terms2 = [], [], [], []
-        for i in range(len(actions)):
-            if np.shape(actions[i])[0] > 5:
-                states2.append(states[i])
-                actions2.append(actions[i])
-                rewards2.append(reward[i])
-                terms2.append(terminated[i])
-        V = self._calculate_v(states2)
+        [actions2, states2, rewards2, terms2] = filter_short_trajs(actions, [states, reward, terminated])
+        V = calculate_v(self.critic, states2, self.state_names)
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         if not self.lsig_test:
-            self._test_layersigs(dset)
+            test_layersigs(self.test_model, dset)
+            self.lsig_test = True
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
                                   verbose=0)
@@ -216,17 +249,10 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
 
     def save_weights(self, directory_location: str):
         # get_weights --> List[np.ndarray]
-        np.savez(os.path.join(directory_location, "actor_weights.npz"), *self.pi_new.layer.get_weights())
-        np.savez(os.path.join(directory_location, "critic_weights.npz"), *self.critic.layer.get_weights())
+        save_weights(self.pi_new, self.critic, directory_location)
 
     def load_weights(self, directory_location: str):
-        d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
-        actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
-        self.pi_new.layer.set_weights(actor_weights)
-        self.pi_old.layer.set_weights(actor_weights)  # TODO: necessary?
-        d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
-        critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
-        self.critic.layer.set_weights(critic_weights)
+        load_weights(self.pi_new, self.pi_old, self.critic, directory_location)
 
 
 class PPOContinuous(Agent, TrainEpoch):
@@ -361,31 +387,6 @@ class PPOContinuous(Agent, TrainEpoch):
 
         return sample
 
-    def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
-        # TODO: move to function outside of class?
-        # Returns: critic evals = List[np.ndarray]
-        #               array for each trajectory
-        V = []
-        # iter thru trajectories:
-        for traj in states:
-            V_traj = []
-            # iter thru windows within a trajectory:
-            for win_start in range(0, np.shape(traj[self._sname0])[0], 32):
-                # uses self.state_names to sync ordering
-                state_wins = [traj[k][win_start:win_start+32] for k in self.state_names]
-                V_traj.append(self.critic(state_wins)[0].numpy())
-            V.append(np.concatenate(V_traj, axis=0))
-        return V
-
-    def _test_layersigs(self, dset: tf.data.Dataset):
-        for v in dset.batch(16):
-            vout = self.test_model(v)
-            print(vout)
-            for k in vout:
-                assert vout[k].numpy()
-            break
-        self.lsig_test = True
-
     def train(self,
               states: List[Dict[str, np.ndarray]],
               reward: List[np.ndarray],
@@ -413,19 +414,14 @@ class PPOContinuous(Agent, TrainEpoch):
             Dict: loss history
         """
         # filter out short trajectories
-        states2, actions2, rewards2, terms2 = [], [], [], []
-        for i in range(len(actions)):
-            if np.shape(actions[i])[0] > 5:
-                states2.append(states[i])
-                actions2.append(actions[i])
-                rewards2.append(reward[i])
-                terms2.append(terminated[i])
-        V = self._calculate_v(states2)
+        [actions2, states2, rewards2, terms2] = filter_short_trajs(actions, [states, reward, terminated])
+        V = calculate_v(self.critic, states2, self.state_names)
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         if not self.lsig_test:
-            self._test_layersigs(dset)
+            test_layersigs(self.test_model, dset)
+            self.lsig_test = True
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
                                   verbose=0)
@@ -436,17 +432,10 @@ class PPOContinuous(Agent, TrainEpoch):
 
     def save_weights(self, directory_location: str):
         # get_weights --> List[np.ndarray]
-        np.savez(os.path.join(directory_location, "actor_weights.npz"), *self.pi_new.layer.get_weights())
-        np.savez(os.path.join(directory_location, "critic_weights.npz"), *self.critic.layer.get_weights())
+        save_weights(self.pi_new, self.critic, directory_location)
 
     def load_weights(self, directory_location: str):
-        d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
-        actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
-        self.pi_new.layer.set_weights(actor_weights)
-        self.pi_old.layer.set_weights(actor_weights)  # TODO: necessary?
-        d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
-        critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
-        self.critic.layer.set_weights(critic_weights)
+        load_weights(self.pi_new, self.pi_old, self.critic, directory_location)
 
 
 class PPOContinuousExplo(Agent, TrainEpoch):
@@ -489,7 +478,7 @@ class PPOContinuousExplo(Agent, TrainEpoch):
             train_epoch (int, optional): Defaults to 8.
             learning_rate (float, optional): Defaults to .001.
         """
-        super(PPOContinuous, self).__init__()
+        super(PPOContinuousExplo, self).__init__()
         self.rng = npr.default_rng(42)
         self.action_bounds = action_bounds
         self.gamma = gamma
@@ -510,7 +499,6 @@ class PPOContinuousExplo(Agent, TrainEpoch):
                                  name="adv", dtype=tf.float32),
                   tf.keras.Input(shape=(),  # target value name
                                  name="val", dtype=tf.float32)]
-        inputs = inputs + s0_inputs
 
         # ppo loss
         pi_new = pi_model_builder()
@@ -525,32 +513,38 @@ class PPOContinuousExplo(Agent, TrainEpoch):
                               critic_pred,
                               inputs[0], inputs[1], inputs[2],
                               eta, vf_scale, entropy_scale)
-        # TODO: forward model loss + encoder loss
-        phi = encoder_model_builder()
-        forward_model = forward_model_builder()
+        # forward model loss + encoder loss
+        self.phi = encoder_model_builder()
+        self.forward_model = forward_model_builder()
         converter_layer = MapperModel(Dense(len(action_bounds)))
-        forward_error, f_test = forward_surprisal(forward_model, phi, s0_inputs, s1_inputs, inputs[0])
-        inv_error, inv_test = inverse_dynamics_error(phi, converter_layer, s0_inputs, s1_inputs, inputs[0])
+        forward_error, f_test = forward_surprisal(self.forward_model, self.phi, s0_inputs, s1_inputs, inputs[0])
+        inv_error, inv_test = inverse_dynamics_error(self.phi, converter_layer, s0_inputs, s1_inputs, inputs[0])
         # primary model
         self.kmodel = CustomModel("loss",
-                                  inputs=inputs,
+                                  inputs=inputs + s0_inputs,
                                   outputs={"loss": tf.math.reduce_mean(loss),
                                            "pr_ratio": pr_ratio,
                                            "new_distro": pi_new_distro,
                                            "old_distro": pi_old_distro})
         self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
         # forward + encoder training model
-        self.fek_model = CustomModel("loss",
-                                  inputs=s0_inputs + s1_inputs + inputs[:1],
-                                  outputs={"loss": tf.math.reduce_mean(forward_error) + tf.math.reduce_mean(inv_error)})
-        self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
+        self.kencoder_model = CustomModel("loss",
+                                         inputs=s0_inputs + s1_inputs + inputs[:1],
+                                         outputs={"loss":tf.math.reduce_mean(inv_error)})
+        self.kforward_model = CustomModel("loss",
+                                         inputs=s0_inputs + s1_inputs + inputs[:1],
+                                          outputs={"loss": tf.math.reduce_mean(forward_error),
+                                                   "surprisal": forward_error})
+        self.kencoder_model.compile(tf.keras.optimizers.Adam(learning_rate))
+        self.kforward_model.compile(tf.keras.optimizers.Adam(learning_rate))
         # testing model
-        self.test_model = Model(inputs=inputs,
+        self.test_model = Model(inputs=inputs + s0_inputs,
                                 outputs={"pi_new_test": pi_new_test,
                                          "pi_old_test": pi_old_test,
-                                         "critic_test": critic_test,
-                                         "f_test": f_test,
-                                         "inv_test": inv_test})
+                                         "critic_test": critic_test})
+                                         # TODO: separate test model for forward model?
+                                         # "f_test": f_test,
+                                         # "inv_test": inv_test})
         self.lsig_test = False
         self.pi_new = pi_new
         self.pi_old = pi_old
@@ -598,33 +592,46 @@ class PPOContinuousExplo(Agent, TrainEpoch):
             print(mus)
             print(covar)
             print(sample)
-
         return sample
 
-    def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
-        # TODO: move to function outside of class?
-        # Returns: critic evals = List[np.ndarray]
-        #               array for each trajectory
-        V = []
-        # iter thru trajectories:
-        for traj in states:
-            V_traj = []
-            # iter thru windows within a trajectory:
-            for win_start in range(0, np.shape(traj[self._sname0])[0], 32):
-                # uses self.state_names to sync ordering
-                state_wins = [traj[k][win_start:win_start+32] for k in self.state_names]
-                V_traj.append(self.critic(state_wins)[0].numpy())
-            V.append(np.concatenate(V_traj, axis=0))
-        return V
+    def _make_offset_states(self, states: List[Dict[str, np.ndarray]]) -> Tuple[Dict[str, np.ndarray],
+                                                                                Dict[str, np.ndarray]]:
+        """converts state trajectories to time offset state trajectories
+            traj_i --> t: traj_i[:-1], t+1: traj_i[1:]
 
-    def _test_layersigs(self, dset: tf.data.Dataset):
-        for v in dset.batch(16):
-            vout = self.test_model(v)
-            print(vout)
-            for k in vout:
-                assert vout[k].numpy()
-            break
-        self.lsig_test = True
+        Args:
+            states (List[Dict[str, np.ndarray]]):
+                outer list = each distinct state
+                inner dict = mapping from state names to
+                    (T + 1) x ... arrays
+
+        Returns:
+            Dict[str, np.ndarray]] states_t
+                traj_i --> traj_i[:-1]
+            Dict[str, np.ndarray]: states_{t+1}
+                traj_i --> traj_i[1:]
+                for both states_t and states_{t+1},
+                    stored as mapping from state names to concatenated trajectories
+                    each trajectory length is shortened by 1 from original
+        """
+        states_t, states_t1 = {}, {}
+        # iter through state names:
+        for k in states[0]:
+            # gather all trajectories for given name
+            states_t[k] = np.concatenate([st_traj[k][:-1] for st_traj in states])
+            states_t1[k] = np.concatenate([st_traj[k][1:] for st_traj in states])
+        return states_t, states_t1
+
+    def _surprisal_reward(self, explo_model: CustomModel, explo_dset: tf.data.Dataset,
+                          explo_reward_name: str = "surprisal"):
+        # intrinsic reward = 'forward surprisal' loss
+        # TODO: normalization?
+        # TODO: loss weighting?
+        explo_rewards = []
+        for v in explo_dset.batch(32):
+            vout = explo_model(v)
+            explo_rewards.append(vout[explo_reward_name].numpy())
+        return np.concatenate(explo_rewards, axis=0)
 
     def train(self,
               states: List[Dict[str, np.ndarray]],
@@ -652,44 +659,51 @@ class PPOContinuousExplo(Agent, TrainEpoch):
         Returns:
             Dict: loss history
         """
-        # TODO: have to update reward with intrinsice motivation factor!!!!
-        #   --> has to be done before updating forward model!!!!
-
-
         # filter out short trajectories
-        states2, actions2, rewards2, terms2 = [], [], [], []
-        states_t = []
-        for i in range(len(actions)):
-            if np.shape(actions[i])[0] > 5:
-                actions2.append(actions[i])
-                rewards2.append(reward[i])
-                terms2.append(terminated[i])
-                states2.append(states[i])
-                # states with time offset for forward model training
-                sadd = {k: states[i][k][:-1] for k in states}
-                for k in states[i]:
-                    sadd[k+"t1"] = states[i][k][1:]
-                states_t.append(sadd)
+        [actions2, states2, rewards2, terms2] = filter_short_trajs(actions, [states, reward, terminated])
+        # time offset states:
+        states_t, states_t1 = self._make_offset_states(states2)
 
-        V = self._calculate_v(states2)
+        # make exploration reward dataset (forward surpisal reward)
+        explo_d = {k: states_t[k] for k in states_t}
+        for k in states_t1:
+            explo_d[k+"t1"] = states_t1[k]
+        explo_d["action"] = np.concatenate(actions2)
+        explo_dset = tf.data.Dataset.from_tensor_slices(explo_d)
+
+        # intrinsic reward
+        explo_reward = self._surprisal_reward(self.kforward_model,
+                                              explo_dset,
+                                              explo_reward_name="surprisal")
+
+        # combine intrinsic reward with rewards2
+        ind_st = 0
+        for i in range(len(rewards2)):
+            ind_end = ind_st + len(rewards2[i])
+            rewards2[i] = rewards2[i] + explo_reward[ind_st:ind_end]
+            ind_st = ind_end
+
+        # train primary model
+        V = calculate_v(self.critic, states2, self.state_names)
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         if not self.lsig_test:
-            self._test_layersigs(dset)
+            test_layersigs(self.test_model, dset)
+            self.lsig_test = True
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
-                                  verbose=0)
+                                  verbose=1)
 
-        # TODO: this needs a bunch of testing!
+        # train forward model and encoders
         # package dset and train forward/encoder models
-        d_fek = {}
-        for k in states_t[0]:
-            d_fek[k] = np.concatenate([st[k] for st in states_t], axis=0)
-        d_fek["action"] = np.concatenate(actions2, axis=0)
-        _ = self.kmodel.fit(tf.data.Dataset.from_tensor_slices(d_fek).batch(self.train_batch_size),
-                            epochs=self.train_epoch,
-                            verbose=1)
+        # NOTE: forward model depends on encoder; encoder does not depend on forward model
+        _ = self.kencoder_model.fit(explo_dset.batch(self.train_batch_size),
+                               epochs=self.train_epoch,
+                               verbose=1)
+        _ = self.kforward_model.fit(explo_dset.batch(self.train_batch_size),
+                               epochs=self.train_epoch,
+                               verbose=1)
 
         # copy update actor to old actor
         copy_model(self.pi_new.layer, self.pi_old.layer, 1.)
