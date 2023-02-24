@@ -68,20 +68,17 @@ def filter_short_trajs(traj0: List, trajs: List, min_length: int = 5):
     return ret_trajs
 
 
-def save_weights(pi_new_model, critic_model, directory_location: str):
-    # get_weights --> List[np.ndarray]
-    np.savez(os.path.join(directory_location, "actor_weights.npz"), *pi_new_model.layer.get_weights())
-    np.savez(os.path.join(directory_location, "critic_weights.npz"), *critic_model.layer.get_weights())
+def save_weights(directory_location: str, layers: List[Layer], fn_roots: List[str]):
+    for l, fnr in zip(layers, fn_roots):
+        np.savez(os.path.join(directory_location, fnr + ".npz"), *l.get_weights())
 
 
-def load_weights(pi_new_model, pi_old_model, critic_model, directory_location: str):
-    d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
-    actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
-    pi_new_model.layer.set_weights(actor_weights)
-    pi_old_model.layer.set_weights(actor_weights)  # TODO: necessary?
-    d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
-    critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
-    critic_model.layer.set_weights(critic_weights)
+def load_weights(directory_location: str, layers: List[Layer], fn_roots: List[str]):
+    for l, fnr in zip(layers, fn_roots):
+        d = np.load(os.path.join(directory_location, fn_roots+".npz"))
+        l = [d["arr_"+str(i)] for i in range(len(d))]
+        l.set_weights(l)
+
 
 
 # models
@@ -248,14 +245,17 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         return history
 
     def save_weights(self, directory_location: str):
-        # get_weights --> List[np.ndarray]
-        save_weights(self.pi_new, self.critic, directory_location)
+        save_weights(directory_location,
+                     [self.pi_new.layer, self.critic.layer],
+                     ["actor_weights", "critic_weights"])
 
     def load_weights(self, directory_location: str):
-        load_weights(self.pi_new, self.pi_old, self.critic, directory_location)
+        load_weights(directory_location,
+                     [self.pi_new.layer, self.pi_old.layer, self.critic.layer],
+                     ["actor_weights", "actor_weights", "critic_weights"])
 
 
-class PPOContinuous(Agent, TrainEpoch):
+class PPOContinuous(Agent, TrainEpoch, WeightMate):
 
     def __init__(self,
                  pi_model_builder: Callable[[], VectorStateModel],
@@ -431,14 +431,17 @@ class PPOContinuous(Agent, TrainEpoch):
         return history
 
     def save_weights(self, directory_location: str):
-        # get_weights --> List[np.ndarray]
-        save_weights(self.pi_new, self.critic, directory_location)
+        save_weights(directory_location,
+                     [self.pi_new.layer, self.critic.layer],
+                     ["actor_weights", "critic_weights"])
 
     def load_weights(self, directory_location: str):
-        load_weights(self.pi_new, self.pi_old, self.critic, directory_location)
+        load_weights(directory_location,
+                     [self.pi_new.layer, self.pi_old.layer, self.critic.layer],
+                     ["actor_weights", "actor_weights", "critic_weights"])
 
 
-class PPOContinuousExplo(Agent, TrainEpoch):
+class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
 
     def __init__(self,
                  pi_model_builder: Callable[[], VectorStateModel],
@@ -538,13 +541,13 @@ class PPOContinuousExplo(Agent, TrainEpoch):
         self.kencoder_model.compile(tf.keras.optimizers.Adam(learning_rate))
         self.kforward_model.compile(tf.keras.optimizers.Adam(learning_rate))
         # testing model
-        self.test_model = Model(inputs=inputs + s0_inputs,
+        self.test_model1 = Model(inputs=inputs + s0_inputs,
                                 outputs={"pi_new_test": pi_new_test,
                                          "pi_old_test": pi_old_test,
                                          "critic_test": critic_test})
-                                         # TODO: separate test model for forward model?
-                                         # "f_test": f_test,
-                                         # "inv_test": inv_test})
+        self.test_model2 = Model(inputs=s0_inputs + s1_inputs + inputs[:1],
+                                outputs={"f_test": f_test,
+                                         "inv_test": inv_test})
         self.lsig_test = False
         self.pi_new = pi_new
         self.pi_old = pi_old
@@ -689,7 +692,8 @@ class PPOContinuousExplo(Agent, TrainEpoch):
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         if not self.lsig_test:
-            test_layersigs(self.test_model, dset)
+            test_layersigs(self.test_model1, dset)
+            test_layersigs(self.test_model2, explo_dset)
             self.lsig_test = True
         history = self.kmodel.fit(dset.batch(self.train_batch_size),
                                   epochs=self.train_epoch,
@@ -708,3 +712,13 @@ class PPOContinuousExplo(Agent, TrainEpoch):
         # copy update actor to old actor
         copy_model(self.pi_new.layer, self.pi_old.layer, 1.)
         return history
+
+    def save_weights(self, directory_location: str):
+        save_weights(directory_location,
+                     [self.pi_new.layer, self.critic.layer, self.phi.layer, self.forward_model.layer],
+                     ["actor_weights", "critic_weights", "encoder_weights", "forward_weights"])
+
+    def load_weights(self, directory_location: str):
+        load_weights(directory_location,
+                     [self.pi_new.layer, self.pi_old.layer, self.critic.layer, self.phi.layer, self.forward_model.layer],
+                     ["actor_weights", "actor_weights", "critic_weights", "encoder_weights", "forward_weights"])

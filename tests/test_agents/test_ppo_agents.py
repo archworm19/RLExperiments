@@ -362,18 +362,17 @@ class TestContinuousExplo(TestCase):
         print(corr)
         self.assertTrue(corr > corr_null)
         self.assertTrue(corr > 0.4)
-        
 
 
 if __name__ == "__main__":
-    # T = TestUtils()
-    # T.test_filter()
-    # T = TestDiscreteAgent()
-    # T.setUp()
-    # T.train_statecorr()
-    # T2 = TestContinuousAgent()
-    # T2.setUp()
-    # T2.train_statecorr()
+    T = TestUtils()
+    T.test_filter()
+    T = TestDiscreteAgent()
+    T.setUp()
+    T.train_statecorr()
+    T2 = TestContinuousAgent()
+    T2.setUp()
+    T2.train_statecorr()
     T = TestContinuousExplo()
     T.setUp()
     T.test_state_offsetting()
