@@ -168,12 +168,13 @@ if __name__ == "__main__":
     #                                                vf_scale=.1, entropy_scale=0.1, eta=0.3, layer_sizes=[128, 64])
     # num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
     # TODO: try out exploration based version
-    env_run, env_viz, agent = build_continuous_ppo_explo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
-                                                         vf_scale=.1, entropy_scale=0.1, eta=0.3)
+    env_run, env_viz, agent = build_continuous_ppo_explo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0005,
+                                                         vf_scale=.1, entropy_scale=0.1, eta=0.3,
+                                                         reward_scale=0.001)
     num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
     discrete_mode = False
 
-    run_and_train(env_run, env_viz, agent, num_actions, 20, 2000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
+    run_and_train(env_run, env_viz, agent, num_actions, 50, 10000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
 
     # parallel + queue
     # builder = partial(build_discrete_ppo, env=EnvsDiscrete.cartpole)

@@ -1,7 +1,6 @@
 """Sub-models used by model builders"""
 import tensorflow as tf
 from tensorflow.keras.layers import Dense, Layer
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, DistroStateModel
 from arch_layers.simple_networks import DenseNetwork
 from typing import List, Tuple
 

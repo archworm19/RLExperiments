@@ -238,6 +238,8 @@ def build_continuous_ppo_explo(env: EnvsContinuous,
                                vf_scale: float = 1.,  # regularization param for critic
                                entropy_scale: float = 0.,  # regularization param for action entropy
                                lam: float = 1.,  # generalized discount factor
+                               reward_scale: float = 1.,
+                               exploration_reward_scale: float = 1.,
                                train_batch_size: int = 64,
                                learning_rate: float = .001,
                                train_epoch: int = 8,
@@ -257,5 +259,6 @@ def build_continuous_ppo_explo(env: EnvsContinuous,
     agent = PPOContinuousExplo(build_pi, build_critic, build_encoder, build_forward_model,
                                env.value.action_bounds, {"core_state": (env.value.dims_obs,)},
                                eta, vf_scale, entropy_scale, gamma, lam,
-                               train_batch_size, train_epoch, learning_rate)
+                               train_batch_size, train_epoch, learning_rate,
+                               reward_scale=reward_scale, exploration_reward_scale=exploration_reward_scale)
     return env_run, env_disp, agent

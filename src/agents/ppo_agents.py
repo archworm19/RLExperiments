@@ -457,7 +457,9 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
                  lam: float = 1.,
                  train_batch_size: int = 32,
                  train_epoch: int = 8,
-                 learning_rate: float = .001):
+                 learning_rate: float = .001,
+                 reward_scale: float = 1.,
+                 exploration_reward_scale: float = 1.):
         """Continuous PPO agent + Forward Exploration
         Args:
             pi_model_builder (Callable[[], VectorStateModel]): actor model builder
@@ -480,6 +482,8 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
             train_batch_size (int, optional): Defaults to 32.
             train_epoch (int, optional): Defaults to 8.
             learning_rate (float, optional): Defaults to .001.
+            reward_scale (float, optional): how much reward is weighted
+            exploration_reward_scale (float, optional): how much exploration reward is weighted
         """
         super(PPOContinuousExplo, self).__init__()
         self.rng = npr.default_rng(42)
@@ -488,6 +492,8 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
         self.lam = lam
         self.train_batch_size = train_batch_size
         self.train_epoch = train_epoch
+        self.reward_scale = reward_scale
+        self.exploration_reward_scale = exploration_reward_scale
 
         # multi-state system
         # pulling out state names ensures consistent ordering for model calls
@@ -629,7 +635,6 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
                           explo_reward_name: str = "surprisal"):
         # intrinsic reward = 'forward surprisal' loss
         # TODO: normalization?
-        # TODO: loss weighting?
         explo_rewards = []
         for v in explo_dset.batch(32):
             vout = explo_model(v)
@@ -683,7 +688,7 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
         ind_st = 0
         for i in range(len(rewards2)):
             ind_end = ind_st + len(rewards2[i])
-            rewards2[i] = rewards2[i] + explo_reward[ind_st:ind_end]
+            rewards2[i] = self.reward_scale * rewards2[i] + self.exploration_reward_scale * explo_reward[ind_st:ind_end]
             ind_st = ind_end
 
         # train primary model
