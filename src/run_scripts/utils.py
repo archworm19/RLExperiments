@@ -149,3 +149,35 @@ class DenseGaussState(Layer):
         prec = self.max_prec * tf.math.sigmoid(self.prec_var) + self.min_prec
         prec = tf.tile(tf.expand_dims(prec, 0), [tf.shape(mu)[0], 1])
         return tf.concat([mu, prec], axis=1)
+
+
+class DenseForwardModel(Layer):
+
+    def __init__(self, layer_sizes: List[int],
+                 embed_dims: int, output_dims: int,
+                 num_state: int,
+                 drop_rate: float = 0.):
+        super(DenseForwardModel, self).__init__()
+        self.action_layer = Dense(embed_dims, activation="relu")
+        self.state_layers = [Dense(embed_dims, activation="relu") for _ in range(num_state)]
+        self.net = DenseNetwork(layer_sizes, output_dims, drop_rate=drop_rate)
+
+    def call(self, action_t: tf.Tensor, state_t: List[tf.Tensor]):
+        vs = [sl(st) for sl, st in zip(self.state_layers, state_t)]
+        va = self.action_layer(action_t)
+        return self.net(tf.concat(vs + [va], axis=1))
+
+
+class DenseEncoder(Layer):
+
+    def __init__(self, layer_sizes: List[int],
+                 embed_dims: int, output_dims: int,
+                 num_state: int,
+                 drop_rate: float = 0.):
+        super(DenseEncoder, self).__init__()
+        self.state_layers = [Dense(embed_dims, activation="relu") for _ in range(num_state)]
+        self.net = DenseNetwork(layer_sizes, output_dims, drop_rate=drop_rate)
+
+    def call(self, state_t: List[tf.Tensor]):
+        vs = [sl(st) for sl, st in zip(self.state_layers, state_t)]
+        return self.net(tf.concat(vs, axis=1))

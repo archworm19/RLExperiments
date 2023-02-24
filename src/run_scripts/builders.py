@@ -12,10 +12,11 @@ import tensorflow as tf
 from typing import Dict, List, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
-from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, DistroStateModel, VectorStateModel
+from frameworks.layer_signatures import ScalarModel, ScalarStateModel, DistroModel, DistroStateModel, VectorStateModel, VectorModel
 from agents.q_agents import QAgent, RunIface, QAgent_cont, RunIfaceCont, QAgent_distro
-from agents.ppo_agents import PPODiscrete, PPOContinuous
-from run_scripts.utils import DenseScalar, DenseScalarPi, DenseDistro, DenseScalarState, DenseDiscreteState, DenseGaussState
+from agents.ppo_agents import PPODiscrete, PPOContinuous, PPOContinuousExplo
+from run_scripts.utils import (DenseScalar, DenseScalarPi, DenseDistro, DenseScalarState, DenseDiscreteState, DenseGaussState,
+                               DenseForwardModel, DenseEncoder)
 
 
 @dataclass
@@ -224,4 +225,37 @@ def build_continuous_ppo(env: EnvsContinuous,
                           env.value.action_bounds, {"core_state": (env.value.dims_obs,)},
                           eta, vf_scale, entropy_scale, gamma, lam,
                           train_batch_size, train_epoch, learning_rate)
+    return env_run, env_disp, agent
+
+
+def build_continuous_ppo_explo(env: EnvsContinuous,
+                               embed_dim: int = 4,
+                               encode_dim: int = 3,  # encoding dims for 'controllable' space
+                               layer_sizes: List[int] = [64, 32],
+                               drop_rate: float = 0.05,
+                               gamma: float = 0.99,
+                               eta: float = 0.3,  # clip hyperparam
+                               vf_scale: float = 1.,  # regularization param for critic
+                               entropy_scale: float = 0.,  # regularization param for action entropy
+                               lam: float = 1.,  # generalized discount factor
+                               train_batch_size: int = 64,
+                               learning_rate: float = .001,
+                               train_epoch: int = 8,
+                               init_var: float = 1.5):  # initial variance (diagonal covariance elems)
+    # states: 1. dim defined by env
+    # build environment
+    env_run, env_disp = _build_env(env.value)
+    def build_critic():
+        return ScalarStateModel(DenseScalarState([embed_dim], layer_sizes, drop_rate))
+    def build_pi():
+        return VectorStateModel(DenseGaussState(env.value.action_bounds, [embed_dim], layer_sizes, drop_rate,
+                               init_prec=1. / init_var, min_prec=1. / init_var, max_prec=8.0))
+    def build_encoder():
+        return VectorStateModel(DenseEncoder(layer_sizes, embed_dim, encode_dim, 1, drop_rate))
+    def build_forward_model():
+        return VectorModel(DenseForwardModel(layer_sizes, embed_dim, encode_dim, 1, drop_rate))
+    agent = PPOContinuousExplo(build_pi, build_critic, build_encoder, build_forward_model,
+                               env.value.action_bounds, {"core_state": (env.value.dims_obs,)},
+                               eta, vf_scale, entropy_scale, gamma, lam,
+                               train_batch_size, train_epoch, learning_rate)
     return env_run, env_disp, agent

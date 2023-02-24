@@ -467,7 +467,7 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
                             second set = diagonal of precision matrix
             value_model_builder (Callable[[], ScalarStateModel]): critic model builder
             encoder_model_builder (Callable[[], VectorStateModel]): builds phi
-            forward_model_builder (Callable[[], VectorStateModel]): forward prediction model builder
+            forward_model_builder (Callable[[], VectorModel]): forward prediction model builder
                 forward model maps from action_t + state_t --> phi(state_{t+1})
             action_bounds (List[Tuple[float]]): (lower bound, upper bound) pairs for
                 each action dimension
