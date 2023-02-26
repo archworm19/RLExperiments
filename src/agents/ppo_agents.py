@@ -8,7 +8,7 @@ from tensorflow.keras import Model
 from tensorflow.keras.layers import Layer
 from frameworks.layer_signatures import DistroStateModel, ScalarStateModel, VectorStateModel
 from frameworks.agent import Agent, TrainEpoch, WeightMate
-from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss, value_conv, package_dataset_critic
+from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss, value_conv, package_dataset_critic, value_loss
 from frameworks.custom_model import CustomModel
 
 
@@ -82,10 +82,10 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         pi_new_distro, pi_new_test = pi_new(s0_inputs)
         pi_old_distro, pi_old_test = pi_old(s0_inputs)
         critic_pred, critic_test = v_model(s0_inputs)
-        loss_critic, loss_actor, negent_actor = ppo_loss_multiclass(pi_old_distro, pi_new_distro,
-                                                                    critic_pred,
-                                                                    inputs[0], inputs[1], inputs[2],
-                                                                    eta)
+        loss_actor, negent_actor = ppo_loss_multiclass(pi_old_distro, pi_new_distro,
+                                                       inputs[0], inputs[1],
+                                                       eta)
+        loss_critic = value_loss(critic_pred, inputs[2])
         # primary models
         self.kmodel_critic = CustomModel("loss",
                                          inputs=s0_inputs + inputs[2:],
@@ -161,6 +161,13 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
             V.append(np.concatenate(V_traj, axis=0))
         return V
 
+    def _calculate_vpred_end(self, states: List[Dict[str, np.ndarray]]):
+        Vend = []
+        for traj in states:
+            state_end = [traj[k][-1:] for k in self.state_names]
+            Vend.append(self.critic(state_end)[0][0].numpy())
+        return Vend
+
     def _test_layersigs(self, dset: tf.data.Dataset):
         for v in dset.batch(16):
             vout = self.test_model(v)
@@ -205,11 +212,10 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
                 terms2.append(terminated[i])
 
         # first: train critic
-        Vpred0 = self._calculate_vpred(states2)
-        v_empirical = [value_conv(vp0, r2, self.gamma, t2)
-                       for vp0, r2, t2 in zip(Vpred0, rewards2, terms2)]
+        Vpred_end = self._calculate_vpred_end(states2)
+        critic_dset = package_dataset_critic(states2, rewards2, Vpred_end, terms2, self.gamma, "val")
         # train critic
-        self.kmodel_critic.fit(package_dataset_critic(states2, v_empirical, "val").batch(self.train_batch_size),
+        self.kmodel_critic.fit(critic_dset.batch(self.train_batch_size),
                                epochs=self.train_epoch,
                                verbose=1)
 

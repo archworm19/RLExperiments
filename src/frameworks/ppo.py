@@ -71,7 +71,7 @@ def advantage_conv(V: np.ndarray,
     return _right_conv(delta, gamma * lam)
 
 
-def value_conv(V: np.ndarray,
+def value_conv(Vend: float,
                reward: np.ndarray,
                gamma: float,
                terminated: bool = False):
@@ -87,8 +87,9 @@ def value_conv(V: np.ndarray,
                 or 0 if terminated sequence
 
     Args:
-        V (np.ndarray): value_model(state) --> V
-            shape = T
+        Vend (float): value_model(state) --> V
+            full shape of V = T
+            here, we need V(T)
         reward (np.ndarray):
             shape = T - 1
         gamma (float): discount factor
@@ -103,19 +104,26 @@ def value_conv(V: np.ndarray,
     if terminated:
         rv = np.concatenate((reward, [0.]), axis=0)
     else:
-        rv = np.concatenate((reward, V[-1:]), axis=0)
+        rv = np.concatenate((reward, [Vend]), axis=0)
     return _right_conv(rv, gamma)
 
 
 # TODO: requires testing
 def package_dataset_critic(states: List[Dict[str, np.ndarray]],
-                           values: List[np.ndarray],
+                           reward: List[np.ndarray],
+                           Vpred_end: List[float],
+                           terminated: List[float],
+                           gamma: float,
                            val_name: str = "val"):
     # ASSUMES: states and values have T as 0 axis
+    #   NOTE: only need the last critic prediction for each trajectory
+    # get values
+    vals = [value_conv(vi, ri, gamma, termi) for vi, ri, termi in
+            zip(Vpred_end, reward, terminated)]
     d = {}
     for k in states[0]:
         d[k] = np.concatenate([st[k] for st in states])
-    d[val_name] = np.concatenate(values, axis=0)
+    d[val_name] = np.concatenate(vals, axis=0)
     dset = tf.data.Dataset.from_tensor_slices(d)
     return dset.shuffle(np.shape(d[val_name])[0])
 
@@ -168,7 +176,7 @@ def package_dataset(states: List[Dict[str, np.ndarray]],
             zip(Vpred, reward, terminated)]
     # NOTE: last value term = V(s_T) ~ no training signal there --> lop it off
     # TODO: could this be the problem? is critic not learning termination; i don't think so
-    vals = [value_conv(vi, ri, gamma, termi)[:-1] for vi, ri, termi in
+    vals = [value_conv(vi[-1], ri, gamma, termi)[:-1] for vi, ri, termi in
             zip(Vpred, reward, terminated)]
 
     # package into dataset
@@ -185,10 +193,8 @@ def package_dataset(states: List[Dict[str, np.ndarray]],
 # TODO: putting actor and critic together is confusing
 #   cuz they're totally distinct --> make it hard to track input dependencies
 def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
-                        critic_pred: tf.Tensor,
                         action: tf.Tensor,
                         advantage: tf.Tensor,
-                        value_target: tf.Tensor,
                         eta: float):
     """ppo loss for multiclass distribution actors
         = returns the various losses from ppo paper for actor error
@@ -216,7 +222,6 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
         eta (float): allowable step size; used by clipped surrogate
 
     Returns:
-        tf.Tensor: value function loss for each sample
         tf.Tensor: clipped surrogate actor loss for each sample (-1 * likelihood)
         tf.Tensor: negentropy
             all shapes = batch_size
@@ -225,9 +230,13 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
     prob_new = tf.math.reduce_sum(pi_new_distro * action, axis=1)
     prob_ratio = tf.math.divide(prob_new, prob_old)
     l_clip = clipped_surrogate_likelihood(prob_ratio, advantage, eta)
-    l_vf = tf.math.pow(critic_pred - value_target, 2.)
     negentropy = tf.math.reduce_sum(pi_new_distro * tf.math.log(pi_new_distro), axis=1)
-    return l_vf, -1.*l_clip, negentropy
+    return -1.*l_clip, negentropy
+
+
+def value_loss(critic_pred: tf.Tensor, value_target: tf.Tensor):
+    # value function loss for each sample
+    return tf.math.pow(critic_pred - value_target, 2.)
 
 
 def _gauss_prob_ratio2(x: tf.Tensor,

@@ -51,7 +51,7 @@ class TestDatasetGen(TestCase):
 
     def test_value_target(self):
         # value estimate?
-        val = value_conv(self.V, self.reward, self.gamma)
+        val = value_conv(self.V[-1], self.reward, self.gamma)
         for i in range(20):
             v_i = 0.
             gfactor = 1.
@@ -137,13 +137,13 @@ class TestLosses(TestCase):
 
         losses = []
         for v in [pi_best, pi_bad, pi_big]:
-            loss_vf, loss_clip, negent = ppo_loss_multiclass(pi_base, v,
-                                    critic_pred,
+            loss_clip, negent = ppo_loss_multiclass(pi_base, v,
                                     action,
                                     advantage,
-                                    value_target,
                                     eta)
-            self.assertTrue(np.shape(loss_vf.numpy()) == (8,))
+            self.assertTrue(np.shape(loss_clip.numpy()) == (8,))
+            # entropy is positive bounded --> negent is negative bounded
+            self.assertTrue(tf.math.reduce_all(negent < 0))
             losses.append(tf.math.reduce_mean(loss_clip).numpy())
         self.assertTrue(losses[0] < losses[1])
         self.assertTrue(np.round(losses[0], 4) == np.round(losses[2], 4))
