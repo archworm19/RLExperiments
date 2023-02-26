@@ -1,8 +1,32 @@
 """Forward Model Exploration Rewards (intrinsic motivation)
+    Also includes random network distillation
 """
 import tensorflow as tf
 from typing import List, Tuple
 from frameworks.layer_signatures import VectorStateModel, MapperModel, VectorModel
+
+
+def randomnet_error(rand_encoder: VectorStateModel,
+                    learned_encoder: VectorStateModel,
+                    state: List[tf.Tensor]) -> Tuple[tf.Tensor, tf.Tensor]:
+    """Random Network Distillation Error in continuous space
+        First published by Burda
+        squared error between random_encoder(s_t) and learned_encoder(s_t)
+
+    Args:
+        rand_encoder (VectorStateModel): random, fixed network encoder
+        learned_encoder (VectorStateModel): learned network encoder
+        state (List[tf.Tensor]):
+
+    Returns:
+        tf.Tensor: random network error for each sample
+            shape = batch_size
+        tf.Tensor: check bit
+    """
+    vr, br = rand_encoder(state)
+    vl, bl = learned_encoder(state)
+    check_bit = tf.math.logical_and(br, bl)
+    return tf.math.reduce_mean(tf.math.pow(tf.stop_gradient(vr) - vl, 2.), axis=1), check_bit
 
 
 def forward_surprisal(forward_model: VectorModel,
@@ -15,7 +39,7 @@ def forward_surprisal(forward_model: VectorModel,
         NOTE: this is pretty basic --> would probably be better to include multiple
             timesteps or move to markovian predictions
 
-        MSE(f(s_t, a_t), phi(s_{t+1})
+        squared_error(f(s_t, a_t), phi(s_{t+1})
 
     Args:
         forward_model (VectorModel): maps from action_t, state_t --> phi(state_t1)
@@ -43,7 +67,7 @@ def inverse_dynamics_error(encoder: VectorStateModel,
     """inverse dynamics error
         goal: train an encoder to only encode 'controllable features'
         encoder: phi(s)
-        error = MSE(v(phi(s_t), phi(s_{t+1})), a_t)
+        error = squared_error(v(phi(s_t), phi(s_{t+1})), a_t)
             NOTE: this function uses MSE --> only appropriate for continuous
                 action space
 

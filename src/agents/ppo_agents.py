@@ -9,7 +9,7 @@ from tensorflow.keras.layers import Layer, Dense
 from frameworks.layer_signatures import DistroStateModel, ScalarStateModel, VectorStateModel, VectorModel, MapperModel
 from frameworks.agent import Agent, TrainEpoch, WeightMate
 from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss
-from frameworks.exploration_forward import forward_surprisal, inverse_dynamics_error
+from frameworks.exploration_forward import forward_surprisal, inverse_dynamics_error, randomnet_error
 from frameworks.custom_model import CustomModel
 
 
@@ -75,9 +75,9 @@ def save_weights(directory_location: str, layers: List[Layer], fn_roots: List[st
 
 def load_weights(directory_location: str, layers: List[Layer], fn_roots: List[str]):
     for l, fnr in zip(layers, fn_roots):
-        d = np.load(os.path.join(directory_location, fn_roots+".npz"))
-        l = [d["arr_"+str(i)] for i in range(len(d))]
-        l.set_weights(l)
+        d = np.load(os.path.join(directory_location, fnr+".npz"))
+        ld = [d["arr_"+str(i)] for i in range(len(d))]
+        l.set_weights(ld)
 
 
 
@@ -459,7 +459,8 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
                  train_epoch: int = 8,
                  learning_rate: float = .001,
                  reward_scale: float = 1.,
-                 exploration_reward_scale: float = 1.):
+                 exploration_reward_scale: float = 1.,
+                 fixed_encoder: bool = False):
         """Continuous PPO agent + Forward Exploration
         Args:
             pi_model_builder (Callable[[], VectorStateModel]): actor model builder
@@ -484,6 +485,7 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
             learning_rate (float, optional): Defaults to .001.
             reward_scale (float, optional): how much reward is weighted
             exploration_reward_scale (float, optional): how much exploration reward is weighted
+            fixed_encoder (bool, optional): if true --> fixes the encoder ~ random network encoding
         """
         super(PPOContinuousExplo, self).__init__()
         self.rng = npr.default_rng(42)
@@ -494,6 +496,7 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
         self.train_epoch = train_epoch
         self.reward_scale = reward_scale
         self.exploration_reward_scale = exploration_reward_scale
+        self.fixed_encoder = fixed_encoder
 
         # multi-state system
         # pulling out state names ensures consistent ordering for model calls
@@ -597,8 +600,9 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
         sample = np.clip(sample, ab[:, 0], ab[:, 1])
 
         if debug:
-            print('mean, covar, and sample')
+            print('mean, precs, covar, and sample')
             print(mus)
+            print(precs)
             print(covar)
             print(sample)
         return sample
@@ -707,9 +711,10 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
         # train forward model and encoders
         # package dset and train forward/encoder models
         # NOTE: forward model depends on encoder; encoder does not depend on forward model
-        _ = self.kencoder_model.fit(explo_dset.batch(self.train_batch_size),
-                               epochs=self.train_epoch,
-                               verbose=1)
+        if not self.fixed_encoder:
+            _ = self.kencoder_model.fit(explo_dset.batch(self.train_batch_size),
+                                epochs=self.train_epoch,
+                                verbose=1)
         _ = self.kforward_model.fit(explo_dset.batch(self.train_batch_size),
                                epochs=self.train_epoch,
                                verbose=1)
@@ -727,3 +732,221 @@ class PPOContinuousExplo(Agent, TrainEpoch, WeightMate):
         load_weights(directory_location,
                      [self.pi_new.layer, self.pi_old.layer, self.critic.layer, self.phi.layer, self.forward_model.layer],
                      ["actor_weights", "actor_weights", "critic_weights", "encoder_weights", "forward_weights"])
+
+
+class PPOContinuousRandNet(Agent, TrainEpoch, WeightMate):
+
+    def __init__(self,
+                 pi_model_builder: Callable[[], VectorStateModel],
+                 value_model_builder: Callable[[], ScalarStateModel],
+                 encoder_model_builder: Callable[[], VectorStateModel],
+                 action_bounds: List[Tuple[float]],
+                 state_dims: Dict[str, Tuple[int]],
+                 eta: float = 0.2,
+                 vf_scale: float = 1.,
+                 entropy_scale: float = .01,
+                 gamma: float = 0.99,
+                 lam: float = 1.,
+                 train_batch_size: int = 32,
+                 train_epoch: int = 8,
+                 learning_rate: float = .001,
+                 reward_scale: float = 1.,
+                 exploration_reward_scale: float = 1.):
+        """Continuous PPO agent + Random Network Distillation error
+        Args:
+            pi_model_builder (Callable[[], VectorStateModel]): actor model builder
+                ASSUMES: actor model outputs gaussian distribution
+                        = batch_size x (2 * action_dims)
+                            first set of action dims = mean
+                            second set = diagonal of precision matrix
+            value_model_builder (Callable[[], ScalarStateModel]): critic model builder
+            encoder_model_builder (Callable[[], VectorStateModel]): builds phi
+            action_bounds (List[Tuple[float]]): (lower bound, upper bound) pairs for
+                each action dimension
+            state_dims (Dict[str, Tuple[int]]): mapping of state names to state dims
+            eta (float, optional): ppo clipping discount. Defaults to 0.2.
+            vf_scale (float, optional): critic error regularization strength. Defaults to 1.
+            entropy_scale (float, optional): entropy regularization strength. Defaults to .01.
+            gamma (float, optional): discount factor. Defaults to 0.99.
+            lam (float, optional): generalized discount scale. Defaults to 1..
+            train_batch_size (int, optional): Defaults to 32.
+            train_epoch (int, optional): Defaults to 8.
+            learning_rate (float, optional): Defaults to .001.
+            reward_scale (float, optional): how much reward is weighted
+            exploration_reward_scale (float, optional): how much exploration reward is weighted
+        """
+        super(PPOContinuousRandNet, self).__init__()
+        self.rng = npr.default_rng(42)
+        self.action_bounds = action_bounds
+        self.gamma = gamma
+        self.lam = lam
+        self.train_batch_size = train_batch_size
+        self.train_epoch = train_epoch
+        self.reward_scale = reward_scale
+        self.exploration_reward_scale = exploration_reward_scale
+
+        # multi-state system
+        # pulling out state names ensures consistent ordering for model calls
+        self.state_names = list(state_dims.keys())
+        s0_inputs = [tf.keras.Input(shape=state_dims[k], dtype=tf.float32, name=k)
+                     for k in self.state_names]
+        inputs = [tf.keras.Input(shape=(len(action_bounds),),
+                                 name="action", dtype=tf.float32),
+                  tf.keras.Input(shape=(),  # advantage
+                                 name="adv", dtype=tf.float32),
+                  tf.keras.Input(shape=(),  # target value name
+                                 name="val", dtype=tf.float32)]
+
+        # ppo loss
+        pi_new = pi_model_builder()
+        pi_old = pi_model_builder()
+        v_model = value_model_builder()
+        # these lines set state ordering (ordering set internally by state names)
+        pi_new_distro, pi_new_test = pi_new(s0_inputs)
+        pi_old_distro, pi_old_test = pi_old(s0_inputs)
+        critic_pred, critic_test = v_model(s0_inputs)
+        loss, pr_ratio = ppo_loss_gauss(pi_old_distro[:, :len(action_bounds)], pi_old_distro[:, len(action_bounds):],
+                              pi_new_distro[:, :len(action_bounds)], pi_new_distro[:, len(action_bounds):],
+                              critic_pred,
+                              inputs[0], inputs[1], inputs[2],
+                              eta, vf_scale, entropy_scale)
+        # forward model loss + encoder loss
+        self.phi = encoder_model_builder()
+        self.phi_random = encoder_model_builder()
+        rand_error, r_test = randomnet_error(self.phi_random, self.phi, s0_inputs)
+        # primary model
+        self.kmodel = CustomModel("loss",
+                                  inputs=inputs + s0_inputs,
+                                  outputs={"loss": tf.math.reduce_mean(loss) + tf.math.reduce_mean(rand_error),
+                                           "pr_ratio": pr_ratio,
+                                           "new_distro": pi_new_distro,
+                                           "old_distro": pi_old_distro})
+        self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
+        # testing model
+        self.test_model1 = Model(inputs=inputs + s0_inputs,
+                                outputs={"pi_new_test": pi_new_test,
+                                         "pi_old_test": pi_old_test,
+                                         "critic_test": critic_test,
+                                         "r_test": r_test})
+        self.lsig_test = False
+        self.pi_new = pi_new
+        self.pi_old = pi_old
+        self.critic = v_model
+        self._sname0 = s0_inputs[0].name
+
+    def init_action(self) -> np.ndarray:
+        """Initial action agent should take
+
+        Returns:
+            np.ndarray: len = dims in action space
+        """
+        # uniform distro within bounds
+        ab = np.array(self.action_bounds)
+        return (ab[:,1] - ab[:,0]) * self.rng.random(size=(1, len(self.action_bounds))) + ab[:,0]
+
+    def select_action(self, state: Dict[str, np.ndarray], test_mode: bool, debug: bool) -> np.ndarray:
+        """select 
+
+        Args:
+            state (Dict[str, np.ndarray]): mapping of state names to batched tensors
+                each tensor = num_sample x ...
+            test_mode (bool): are we in a 'test run' for the agent?
+            debug (bool): debug mode
+
+        Returns:
+            np.ndarray: selected actions
+                shape = num_sample x action_dims
+        """
+        # use state_names to sync order
+        state_ord = [state[k] for k in self.state_names]
+        # --> shape = concat[mus, precisions]
+        g = self.pi_new(state_ord)[0][0].numpy()
+        mus = g[:len(self.action_bounds)]
+        precs = g[len(self.action_bounds):]
+        # since diagonal --> can just invert to get covar
+        covar = 1. / precs
+        # sample from gaussian
+        sample = self.rng.normal(mus, np.sqrt(covar), size=(1, len(mus)))
+        ab = np.array(self.action_bounds)
+        sample = np.clip(sample, ab[:, 0], ab[:, 1])
+
+        if debug:
+            print('mean, covar, and sample')
+            print(mus)
+            print(covar)
+            print(sample)
+        return sample
+
+    def _random_reward(self, rand_encoder: VectorStateModel, encoder: VectorStateModel,
+                       state: Dict[str, np.ndarray], state_names: List[str]):
+        # TODO: this needs testing
+        # intrinsic reward = 'forward surprisal' loss
+        state_l = [state[k] for k in state_names]
+        explo_rewards = []
+        for i in range(0, np.shape(state_l[0])[0], 32):
+            sub_state = [sl[i:i+32] for sl in state_l]
+            err, _ = randomnet_error(rand_encoder, encoder, sub_state)
+            explo_rewards.append(err.numpy())
+        return np.concatenate(explo_rewards, axis=0)
+
+    def train(self,
+              states: List[Dict[str, np.ndarray]],
+              reward: List[np.ndarray],
+              actions: List[np.ndarray],
+              terminated: List[bool]) -> Dict:
+        """train agent on data trajectories
+        KEY: each element of outer list for each
+            argument = different trajectory/run
+
+        Args:
+            states (List[Dict[str, np.ndarray]]):
+                outer list = each distinct state
+                inner dict = mapping from state names to
+                    (T + 1) x ... arrays
+            reward (List[np.ndarray]):
+                Each list is a different trajectory.
+                Each ndarray has shape T x ...
+            actions (List[np.ndarray]): where len of each state
+                Each list is a different trajectory.
+                Each ndarray has shape T x ...
+            terminated (List[bool]): whether each trajectory
+                was terminated or is still running
+
+        Returns:
+            Dict: loss history
+        """
+        # filter out short trajectories
+        [actions2, states2, rewards2, terms2] = filter_short_trajs(actions, [states, reward, terminated])
+
+        # intrinsic reward ~ must be before training!!!
+        explo_reward = [self._random_reward(self.phi_random, self.phi, s2, self.state_names)
+                        for s2 in states2]
+
+        # combine intrinsic reward with rewards2
+        for i in range(len(rewards2)):
+            rewards2[i] = self.reward_scale * rewards2[i] + self.exploration_reward_scale * explo_reward[i][:-1]
+
+        # train primary model
+        V = calculate_v(self.critic, states2, self.state_names)
+        dset = package_dataset(states2, V, rewards2, actions2, terms2,
+                               self.gamma, self.lam,
+                               adv_name="adv", val_name="val", action_name="action")
+        if not self.lsig_test:
+            test_layersigs(self.test_model1, dset)
+            self.lsig_test = True
+        history = self.kmodel.fit(dset.batch(self.train_batch_size),
+                                  epochs=self.train_epoch,
+                                  verbose=1)
+        # copy update actor to old actor
+        copy_model(self.pi_new.layer, self.pi_old.layer, 1.)
+        return history
+
+    def save_weights(self, directory_location: str):
+        save_weights(directory_location,
+                     [self.pi_new.layer, self.critic.layer, self.phi.layer, self.phi_random.layer],
+                     ["actor_weights", "critic_weights", "encoder_weights", "r_encoder_weights"])
+
+    def load_weights(self, directory_location: str):
+        load_weights(directory_location,
+                     [self.pi_new.layer, self.pi_old.layer, self.critic.layer, self.phi.layer, self.phi_random.layer],
+                     ["actor_weights", "actor_weights", "critic_weights", "encoder_weights", "r_encoder_weights"])

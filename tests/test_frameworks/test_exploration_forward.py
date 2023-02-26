@@ -4,7 +4,7 @@ from typing import List
 from unittest import TestCase
 from tensorflow.keras.layers import Dense, Layer
 from frameworks.layer_signatures import VectorStateModel, MapperModel, VectorModel
-from frameworks.exploration_forward import forward_surprisal, inverse_dynamics_error
+from frameworks.exploration_forward import forward_surprisal, inverse_dynamics_error, randomnet_error
 
 
 class ForwardModel(Layer):
@@ -91,8 +91,24 @@ class TestInvDyn(TestCase):
         self.assertTrue(check_bit)
 
 
+class TestRandNet(TestCase):
+
+    def test_random_net_error(self):
+        batch_size = 16
+        encode_dims = 4
+        state = [tf.ones((batch_size, 5)), tf.ones((batch_size, 7))]
+        Er = VectorStateModel(Encoder(encode_dims, 2))
+        El = VectorStateModel(Encoder(encode_dims, 2))
+        err, check_bit = randomnet_error(Er, El, state)
+        self.assertTrue(tf.math.reduce_all(tf.shape(err) == tf.constant([batch_size])))
+        self.assertTrue(tf.math.reduce_all(err >= 0.))
+        self.assertTrue(check_bit)
+
+
 if __name__ == "__main__":
     T = TestForwardSurprisal()
     T.test_forward_surprisal()
     T = TestInvDyn()
     T.test_inverse_dynamics()
+    T = TestRandNet()
+    T.test_random_net_error()

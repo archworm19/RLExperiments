@@ -232,6 +232,8 @@ def _gauss_prob_ratio2(x: tf.Tensor,
     return tf.math.exp(log_det + log_exp_num - log_exp_denom)
 
 
+# TODO: I'm wondering if critic should be trained first
+#   --> up-to-date critic? does this even make sense?
 def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
                    pi_new_mu: tf.Tensor, pi_new_precision: tf.Tensor,
                    critic_pred: tf.Tensor,

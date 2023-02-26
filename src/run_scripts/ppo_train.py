@@ -6,7 +6,7 @@ from typing import Callable
 from multiprocessing import connection, Process, Pipe, Queue
 from functools import partial
 from run_scripts.runner import simple_run
-from run_scripts.builders import EnvsDiscrete, EnvsContinuous, build_discrete_ppo, build_continuous_ppo, build_continuous_ppo_explo
+from run_scripts.builders import EnvsDiscrete, EnvsContinuous, build_discrete_ppo, build_continuous_ppo, build_continuous_ppo_explo, build_continuous_ppo_rando
 
 
 def run_and_train(env_run, env_viz, agent,
@@ -167,19 +167,24 @@ if __name__ == "__main__":
     # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
     #                                                vf_scale=.1, entropy_scale=0.1, eta=0.3, layer_sizes=[128, 64])
     # num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
-    # TODO: try out exploration based version
-    env_run, env_viz, agent = build_continuous_ppo_explo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0005,
-                                                         vf_scale=.1, entropy_scale=0.1, eta=0.3,
-                                                         reward_scale=0.001)
-    num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
-    discrete_mode = False
+    # try out exploration based version
+    # env_run, env_viz, agent = build_continuous_ppo_explo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0005,
+    #                                                      vf_scale=.1, entropy_scale=0.1, eta=0.3,
+    #                                                      reward_scale=0.001)
+    # num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
+    # discrete_mode = False
 
-    run_and_train(env_run, env_viz, agent, num_actions, 50, 10000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
+    #run_and_train(env_run, env_viz, agent, num_actions, 50, 10000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
 
     # parallel + queue
     # builder = partial(build_discrete_ppo, env=EnvsDiscrete.cartpole)
     # builder = partial(build_continuous_ppo, env=EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
     #                         vf_scale=.1, entropy_scale=0.0, eta=0.3)
+    builder = partial(build_continuous_ppo_explo, EnvsContinuous.pendulum, init_var=1., learning_rate=.0002,
+                      vf_scale=0.1, entropy_scale=0.1, eta=0.3, reward_scale=1., exploration_reward_scale=0.,
+                      fixed_encoder=True)
+    # builder = partial(build_continuous_ppo_rando, EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
+    #                   vf_scale=0.1, entropy_scale=0.1, eta=0.3, reward_scale=0.0)
     # builder = partial(build_continuous_ppo, EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
     #                         vf_scale=0.1, entropy_scale=.01, eta=0.3, layer_sizes=[128, 64])
-    # ll_run_and_train_queue(builder, 4, 'weights/', 50, 4000, 500, 500, 42, discrete_mode=False, viz_debug=False)
+    ll_run_and_train_queue(builder, 4, 'weights/', 50, 4000, 500, 500, 42, discrete_mode=False, viz_debug=False)
