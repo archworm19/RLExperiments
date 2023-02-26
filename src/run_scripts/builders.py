@@ -179,11 +179,10 @@ def build_discrete_ppo(env: EnvsDiscrete,
                        drop_rate: float = 0.05,
                        gamma: float = 0.99,
                        eta: float = 0.3,  # clip hyperparam
-                       vf_scale: float = 1.,  # regularization param for critic
                        entropy_scale: float = 0.,  # regularization param for action entropy
                        lam: float = 1.,  # generalized discount factor
                        train_batch_size: int = 64,
-                       learning_rate: float = .001,
+                       learning_rate: float = .0001,
                        train_epoch: int = 8):
     # states: 1. dim defined by env, 2. time (1)
     # build environment
@@ -194,7 +193,7 @@ def build_discrete_ppo(env: EnvsDiscrete,
         return DistroStateModel(DenseDiscreteState(env.value.dims_actions, [embed_dim], layer_sizes, drop_rate))
     agent = PPODiscrete(build_pi, build_critic,
                         env.value.dims_actions, {"core_state": (env.value.dims_obs,)},
-                        eta, vf_scale, entropy_scale, gamma, lam,
+                        eta, entropy_scale, gamma, lam,
                         train_batch_size, train_epoch, learning_rate)
     return env_run, env_disp, agent
 

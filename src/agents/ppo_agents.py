@@ -8,7 +8,7 @@ from tensorflow.keras import Model
 from tensorflow.keras.layers import Layer
 from frameworks.layer_signatures import DistroStateModel, ScalarStateModel, VectorStateModel
 from frameworks.agent import Agent, TrainEpoch, WeightMate
-from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss
+from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss, value_conv, package_dataset_critic
 from frameworks.custom_model import CustomModel
 
 
@@ -32,7 +32,6 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
                  num_actions: int,
                  state_dims: Dict[str, Tuple[int]],
                  eta: float = 0.2,
-                 vf_scale: float = 1.,
                  entropy_scale: float = .01,
                  gamma: float = 0.99,
                  lam: float = 1.,
@@ -74,7 +73,6 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
                                  name="adv", dtype=tf.float32),
                   tf.keras.Input(shape=(),  # target value name
                                  name="val", dtype=tf.float32)]
-        inputs = inputs + s0_inputs
 
         # ppo loss
         pi_new = pi_model_builder()
@@ -84,17 +82,21 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         pi_new_distro, pi_new_test = pi_new(s0_inputs)
         pi_old_distro, pi_old_test = pi_old(s0_inputs)
         critic_pred, critic_test = v_model(s0_inputs)
-        loss = ppo_loss_multiclass(pi_old_distro, pi_new_distro,
-                                   critic_pred,
-                                   inputs[0], inputs[1], inputs[2],
-                                   eta, vf_scale=vf_scale, entropy_scale=entropy_scale)
-        # primary model
-        self.kmodel = CustomModel("loss",
-                                  inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_mean(loss)})
-        self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
+        loss_critic, loss_actor, negent_actor = ppo_loss_multiclass(pi_old_distro, pi_new_distro,
+                                                                    critic_pred,
+                                                                    inputs[0], inputs[1], inputs[2],
+                                                                    eta)
+        # primary models
+        self.kmodel_critic = CustomModel("loss",
+                                         inputs=s0_inputs + inputs[2:],
+                                         outputs={"loss": tf.math.reduce_mean(loss_critic)})
+        self.kmodel_actor = CustomModel("loss",
+                                         inputs=s0_inputs + inputs[:2],
+                                         outputs={"loss": tf.math.reduce_mean(loss_actor) + entropy_scale*tf.math.reduce_mean(negent_actor)})
+        self.kmodel_critic.compile(tf.keras.optimizers.Adam(learning_rate))
+        self.kmodel_actor.compile(tf.keras.optimizers.Adam(learning_rate))
         # test model ~ just for checking layer signatures are adhered to
-        self.test_model = Model(inputs=inputs,
+        self.test_model = Model(inputs=s0_inputs + inputs,
                                 outputs={"pi_new_test": pi_new_test,
                                          "pi_old_test": pi_old_test,
                                          "critic_test": critic_test})
@@ -142,8 +144,9 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         v = boolz * 1.
         return np.hstack((v[:,:1], v[:,1:] - v[:,:-1]))
 
-    def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
+    def _calculate_vpred(self, states: List[Dict[str, np.ndarray]]):
         # TODO: tf.function?
+        # Vpred = predicted value function = critic output
         # Returns: critic evals = List[np.ndarray]
         #               array for each trajectory
         V = []
@@ -200,15 +203,26 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
                 actions2.append(actions[i])
                 rewards2.append(reward[i])
                 terms2.append(terminated[i])
-        V = self._calculate_v(states2)
+
+        # first: train critic
+        Vpred0 = self._calculate_vpred(states2)
+        v_empirical = [value_conv(vp0, r2, self.gamma, t2)
+                       for vp0, r2, t2 in zip(Vpred0, rewards2, terms2)]
+        # train critic
+        self.kmodel_critic.fit(package_dataset_critic(states2, v_empirical, "val").batch(self.train_batch_size),
+                               epochs=self.train_epoch,
+                               verbose=1)
+
+        # second: train actor
+        V = self._calculate_vpred(states2)
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         if not self.lsig_test:
             self._test_layersigs(dset)
-        history = self.kmodel.fit(dset.batch(self.train_batch_size),
-                                  epochs=self.train_epoch,
-                                  verbose=0)
+        history = self.kmodel_actor.fit(dset.batch(self.train_batch_size),
+                                        epochs=self.train_epoch,
+                                        verbose=1)
         # copy update actor to old actor
         copy_model(self.pi_new.layer, self.pi_old.layer, 1.)
         return history
@@ -360,6 +374,7 @@ class PPOContinuous(Agent, TrainEpoch):
 
         return sample
 
+    # TODO: this is predicted V... is that correct?
     def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
         # TODO: move to function outside of class?
         # Returns: critic evals = List[np.ndarray]
@@ -419,6 +434,9 @@ class PPOContinuous(Agent, TrainEpoch):
                 actions2.append(actions[i])
                 rewards2.append(reward[i])
                 terms2.append(terminated[i])
+
+        # TODO: calculate v --> train critic --> recalculate v
+
         V = self._calculate_v(states2)
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,

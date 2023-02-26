@@ -156,9 +156,9 @@ if __name__ == "__main__":
     # num_actions = EnvsDiscrete.cartpole.value.dims_actions
     # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.acrobot)
     # num_actions = EnvsDiscrete.acrobot.value.dims_actions
-    # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.lunar, entropy_scale=0.5, embed_dim=16, layer_sizes=[128, 64])
-    # num_actions = EnvsDiscrete.lunar.value.dims_actions
-    # discrete_mode = True
+    env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.lunar, entropy_scale=0.5, embed_dim=16, layer_sizes=[128, 64])
+    num_actions = EnvsDiscrete.lunar.value.dims_actions
+    discrete_mode = True
 
     # continuous
     # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
@@ -169,12 +169,12 @@ if __name__ == "__main__":
     # num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
     # discrete_mode = False
 
-    # run_and_train(env_run, env_viz, agent, num_actions, 20, 2000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
+    run_and_train(env_run, env_viz, agent, num_actions, 20, 5000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
 
     # parallel + queue
     # builder = partial(build_discrete_ppo, env=EnvsDiscrete.cartpole)
     # builder = partial(build_continuous_ppo, env=EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
     #                         vf_scale=.1, entropy_scale=0.0, eta=0.3)
-    builder = partial(build_continuous_ppo, EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
-                            vf_scale=0.1, entropy_scale=.01, eta=0.3, layer_sizes=[128, 64])
-    ll_run_and_train_queue(builder, 4, 'weights/', 50, 4000, 500, 500, 42, discrete_mode=False, viz_debug=False)
+    # builder = partial(build_continuous_ppo, EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
+    #                         vf_scale=0.1, entropy_scale=.01, eta=0.3, layer_sizes=[128, 64])
+    # ll_run_and_train_queue(builder, 4, 'weights/', 50, 4000, 500, 500, 42, discrete_mode=False, viz_debug=False)

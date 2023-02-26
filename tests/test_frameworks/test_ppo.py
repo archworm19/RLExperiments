@@ -137,14 +137,14 @@ class TestLosses(TestCase):
 
         losses = []
         for v in [pi_best, pi_bad, pi_big]:
-            loss = ppo_loss_multiclass(pi_base, v,
+            loss_vf, loss_clip, negent = ppo_loss_multiclass(pi_base, v,
                                     critic_pred,
                                     action,
                                     advantage,
                                     value_target,
                                     eta)
-            self.assertTrue(np.shape(loss.numpy()) == (8,))
-            losses.append(tf.math.reduce_mean(loss).numpy())
+            self.assertTrue(np.shape(loss_vf.numpy()) == (8,))
+            losses.append(tf.math.reduce_mean(loss_clip).numpy())
         self.assertTrue(losses[0] < losses[1])
         self.assertTrue(np.round(losses[0], 4) == np.round(losses[2], 4))
 

@@ -2,6 +2,7 @@
     PPO paper: Proximal Policy Optimization Algorithms
         Schulman et al, 2017
 """
+from tkinter import E
 import tensorflow as tf
 import numpy as np
 from typing import List, Dict
@@ -106,8 +107,21 @@ def value_conv(V: np.ndarray,
     return _right_conv(rv, gamma)
 
 
+# TODO: requires testing
+def package_dataset_critic(states: List[Dict[str, np.ndarray]],
+                           values: List[np.ndarray],
+                           val_name: str = "val"):
+    # ASSUMES: states and values have T as 0 axis
+    d = {}
+    for k in states[0]:
+        d[k] = np.concatenate([st[k] for st in states])
+    d[val_name] = np.concatenate(values, axis=0)
+    dset = tf.data.Dataset.from_tensor_slices(d)
+    return dset.shuffle(np.shape(d[val_name])[0])
+
+
 def package_dataset(states: List[Dict[str, np.ndarray]],
-                    V: List[np.ndarray],
+                    Vpred: List[np.ndarray],
                     reward: List[np.ndarray],
                     actions: List[np.ndarray],
                     terminated: List[bool],
@@ -116,7 +130,7 @@ def package_dataset(states: List[Dict[str, np.ndarray]],
                     adv_name: str = "adv",
                     val_name: str = "val",
                     action_name: str = "action"):
-    """package dataset for ppo training actor and/or critic
+    """package dataset for ppo training actor
 
         Assumed ordering: s_t + a_t --> r_t, s_{t+1}
         so, 0th element of each array = function of state s0
@@ -151,11 +165,11 @@ def package_dataset(states: List[Dict[str, np.ndarray]],
                 > actions (action_name)
     """
     advs = [advantage_conv(vi, ri, gamma, lam, termi) for vi, ri, termi in
-            zip(V, reward, terminated)]
+            zip(Vpred, reward, terminated)]
     # NOTE: last value term = V(s_T) ~ no training signal there --> lop it off
     # TODO: could this be the problem? is critic not learning termination; i don't think so
     vals = [value_conv(vi, ri, gamma, termi)[:-1] for vi, ri, termi in
-            zip(V, reward, terminated)]
+            zip(Vpred, reward, terminated)]
 
     # package into dataset
     d = {}
@@ -168,16 +182,16 @@ def package_dataset(states: List[Dict[str, np.ndarray]],
     return dset.shuffle(np.shape(d[adv_name])[0])
 
 
+# TODO: putting actor and critic together is confusing
+#   cuz they're totally distinct --> make it hard to track input dependencies
 def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
                         critic_pred: tf.Tensor,
                         action: tf.Tensor,
                         advantage: tf.Tensor,
                         value_target: tf.Tensor,
-                        eta: float,
-                        vf_scale: float = 1.,
-                        entropy_scale: float = 0.):
+                        eta: float):
     """ppo loss for multiclass distribution actors
-        = L^CLIP + L^VF from ppo paper for actor error
+        = returns the various losses from ppo paper for actor error
             as well as critic error (V(s_t) - V_targ)^2
 
         NOTE: this loss trains actor and critic simultaneously
@@ -200,13 +214,12 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
         value_target (tf.Tensor): critic target
             shape = batch_size
         eta (float): allowable step size; used by clipped surrogate
-        vf_scale (float): scale on L^VF term
-            c1 from 
-        entropy_scale (float): c2 from ppo paper
 
     Returns:
-        tf.Tensor: loss for each sample
-            shape = batch_size
+        tf.Tensor: value function loss for each sample
+        tf.Tensor: clipped surrogate actor loss for each sample (-1 * likelihood)
+        tf.Tensor: negentropy
+            all shapes = batch_size
     """
     prob_old = tf.stop_gradient(tf.math.reduce_sum(pi_old_distro * action, axis=1))
     prob_new = tf.math.reduce_sum(pi_new_distro * action, axis=1)
@@ -214,7 +227,7 @@ def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
     l_clip = clipped_surrogate_likelihood(prob_ratio, advantage, eta)
     l_vf = tf.math.pow(critic_pred - value_target, 2.)
     negentropy = tf.math.reduce_sum(pi_new_distro * tf.math.log(pi_new_distro), axis=1)
-    return vf_scale * l_vf - l_clip + entropy_scale * negentropy
+    return l_vf, -1.*l_clip, negentropy
 
 
 def _gauss_prob_ratio2(x: tf.Tensor,
@@ -232,6 +245,7 @@ def _gauss_prob_ratio2(x: tf.Tensor,
     return tf.math.exp(log_det + log_exp_num - log_exp_denom)
 
 
+# TODO: redo this ~ return multiple losses
 def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
                    pi_new_mu: tf.Tensor, pi_new_precision: tf.Tensor,
                    critic_pred: tf.Tensor,
