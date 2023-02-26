@@ -49,6 +49,30 @@ class TestDatasetGen(TestCase):
             a_i += gfactor * self.V[-1]
             self.assertTrue(np.round(a_i, 4) == np.round(At[i], 4))
 
+    def test_advantage_spec(self):
+        # test some special cases
+        # not termination
+        lam = 0.95
+        v = np.array([0., 1., 2., -2.])
+        r = np.array([2., -2., 1.])
+        deltas = np.array([r[0] + self.gamma*v[1] - v[0],
+                           r[1] + self.gamma*v[2] - v[1],
+                           r[2] + self.gamma*v[3] - v[2]])
+        exp_advs = np.array([deltas[0] + self.gamma * lam * deltas[1] + (self.gamma * lam)**2. * deltas[2],
+                             deltas[1] + self.gamma * lam * deltas[2],
+                             deltas[2]])
+        advs = advantage_conv(v, r, self.gamma, lam, terminated=False)
+        self.assertTrue(np.all(advs == exp_advs))
+        # terminated
+        deltas = np.array([r[0] + self.gamma*v[1] - v[0],
+                           r[1] + self.gamma*v[2] - v[1],
+                           r[2] + 0.*v[3] - v[2]])
+        exp_advs = np.array([deltas[0] + self.gamma * lam * deltas[1] + (self.gamma * lam)**2. * deltas[2],
+                             deltas[1] + self.gamma * lam * deltas[2],
+                             deltas[2]])
+        advs = advantage_conv(v, r, self.gamma, lam, terminated=True)
+        self.assertTrue(np.all(advs == exp_advs))
+
     def test_value_target(self):
         # value estimate?
         val = value_conv(self.V[-1], self.reward, self.gamma)
@@ -61,7 +85,25 @@ class TestDatasetGen(TestCase):
             v_i += self.V[-1] * gfactor
             self.assertTrue(np.round(v_i, 4) == np.round(val[i], 4))
 
-    # TODO: termination tests
+    def test_value_spec(self):
+        # some value special cases
+        # 1: sparse termination
+        rew = np.array([1., 0., 0., 0., 0.])
+        Vend = 10.
+        val = value_conv(Vend, rew, self.gamma, terminated=True)
+        self.assertTrue(np.all(val == np.array([1.] + [0.] * 5)))
+        # 2: sparse + no termination
+        val = value_conv(Vend, rew, self.gamma, terminated=False)
+        exp_base = Vend * (self.gamma ** np.arange(6))[::-1]
+        exp_base[0] = exp_base[0] + 1.
+        self.assertTrue(np.all(val == exp_base))
+        # 3: dense + termination
+        rew = np.array([1., -1., 1., -1., 1.])
+        val = value_conv(-1., rew, 1., terminated=True)
+        self.assertTrue(np.all(val == np.array([1., 0., 1., 0., 1., 0.])))
+        # 4: dense + no termination
+        val = value_conv(-1., rew, 1., terminated=False)
+        self.assertTrue(np.all(val == np.array([0., -1., 0., -1., 0., -1.])))
 
     def test_pkg_dset(self):
         # test with 2 sequences of different lengths
@@ -183,6 +225,8 @@ if __name__ == "__main__":
     T.test_loss()
     T = TestDatasetGen()
     T.setUp()
+    T.test_advantage_spec()
+    T.test_value_spec()
     T.test_advantage()
     T.test_value_target()
     T.test_pkg_dset()

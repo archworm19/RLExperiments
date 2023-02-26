@@ -136,13 +136,16 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         pr = self.pi_new(state_ord)[0].numpy()
         # --> shape = num_sample x 1
         r = self.rng.random(size=(np.shape(pr)[0], 1))
+        boolz = r <= np.cumsum(pr, axis=1)
+        v = boolz * 1.
+        act_sel = np.hstack((v[:,:1], v[:,1:] - v[:,:-1]))
         if debug:
             print('probability and random draw')
             print(pr)
             print(r)
-        boolz = r <= np.cumsum(pr, axis=1)
-        v = boolz * 1.
-        return np.hstack((v[:,:1], v[:,1:] - v[:,:-1]))
+            print(self.critic(state_ord))
+            print(act_sel)
+        return act_sel
 
     def _calculate_vpred(self, states: List[Dict[str, np.ndarray]]):
         # TODO: tf.function?
