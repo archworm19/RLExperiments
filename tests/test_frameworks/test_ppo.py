@@ -194,9 +194,7 @@ class TestLosses(TestCase):
         # ppo loss gauss
         # repeat the multiloss tests for gaussian space
         rng = npr.default_rng(42)
-        critic_pred = tf.zeros([8], dtype=tf.float32)
         action = tf.constant(rng.random((8, 2)), dtype=tf.float32)
-        value_target = tf.zeros([8], dtype=tf.float32)
         advantage = tf.constant([1., -1.] * 2 + [-1., 1.] * 2, dtype=tf.float32)
         eta = 0.3  # step size
         # everybody uses same precision
@@ -208,16 +206,23 @@ class TestLosses(TestCase):
         # bad model ~ wrong direction
         mu_bad = mu_base - (action - mu_base) * advantage[:, None]
 
-        loss_good, pr_good = ppo_loss_gauss(mu_base, prec, mu_good, prec,
-                                critic_pred, action,
-                                advantage, value_target, eta)
-        loss_bad, pr_bad = ppo_loss_gauss(mu_base, prec, mu_bad, prec,
-                                critic_pred, action,
-                                advantage, value_target, eta)
+        loss_good, _, pr_good = ppo_loss_gauss(mu_base, prec, mu_good, prec,
+                                               action, advantage, eta)
+        loss_bad, _, pr_bad = ppo_loss_gauss(mu_base, prec, mu_bad, prec,
+                                             action, advantage, eta)
         print(loss_good)
         print(loss_bad)
         self.assertTrue(np.shape(loss_good.numpy()) == (8,))
         self.assertTrue(tf.math.reduce_mean(loss_good) < tf.math.reduce_mean(loss_bad))
+
+        # test (neg)entropy
+        # low precision --> high covariance --> high entropy --> low negentropy
+        _, negent_low, _ = ppo_loss_gauss(mu_base, prec, mu_good, prec,
+                                          action, advantage, eta)
+        prec_hi = 2. * prec
+        _, negent_hi, _ = ppo_loss_gauss(mu_base, prec, mu_good, prec_hi,
+                                         action, advantage, eta)
+        self.assertTrue(tf.math.reduce_all(negent_hi > negent_low))
 
 
 if __name__ == "__main__":

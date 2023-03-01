@@ -190,8 +190,6 @@ def package_dataset(states: List[Dict[str, np.ndarray]],
     return dset.shuffle(np.shape(d[adv_name])[0])
 
 
-# TODO: putting actor and critic together is confusing
-#   cuz they're totally distinct --> make it hard to track input dependencies
 def ppo_loss_multiclass(pi_old_distro: tf.Tensor, pi_new_distro: tf.Tensor,
                         action: tf.Tensor,
                         advantage: tf.Tensor,
@@ -254,23 +252,12 @@ def _gauss_prob_ratio2(x: tf.Tensor,
     return tf.math.exp(log_det + log_exp_num - log_exp_denom)
 
 
-# TODO: redo this ~ return multiple losses
 def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
                    pi_new_mu: tf.Tensor, pi_new_precision: tf.Tensor,
-                   critic_pred: tf.Tensor,
                    action: tf.Tensor,
                    advantage: tf.Tensor,
-                   value_target: tf.Tensor,
-                   eta: float,
-                   vf_scale: float = 1.,
-                   entropy_scale: float = 0.):
+                   eta: float):
     """ppo loss for gaussian distribution actors
-        = L^CLIP - L^VF + entropy from ppo paper for actor error
-            as well as critic error (V(s_t) - V_targ)^2
-
-        NOTE: this loss trains actor and critic simultaneously
-        NOTE: using fixed advantage --> actor is trained on
-            old value model
 
     Args:
         pi_old_mu (tf.Tensor): mean outputs by old actor
@@ -279,35 +266,26 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
             shape = batch_size x action_dims = diagonal covar
         pi_new_mu (tf.Tensor):
         pi_new_precision (tf.Tensor):
-        critic_pred (tf.Tensor):
-            critic prediction ~ should approximate value calc
-            shape = batch_size
         action (tf.Tensor): one-hot actions
             shape = batch_size x num_actions
         advantage (tf.Tensor): estimated advantage
             shape = batch_size
-        value_target (tf.Tensor): critic target
-            shape = batch_size
         eta (float): allowable step size; used by clipped surrogate
-        vf_scale (float): scale on L^VF term
-            c1 from ppo paper
-        entropy_scale (float): scale term for entropy
-            c2 from ppo paper
 
     Returns:
-        tf.Tensor: loss for each point
-            shape = batch_size
+        tf.Tensor: clipped surrogate loss for each point
+        tf.Tensor: negative entropy for each point
         tf.Tensor: prob ratio for each point
+            all shapes = batch_size
     """
     prob_ratio = _gauss_prob_ratio2(action,
                                     pi_new_mu, pi_new_precision,
                                     tf.stop_gradient(pi_old_mu),
                                     tf.stop_gradient(pi_old_precision))
     l_clip = clipped_surrogate_likelihood(prob_ratio, advantage, eta)
-    l_vf = tf.math.pow(critic_pred - value_target, 2.)
     # entropy for gaussian with diagonal covar = k * log(det(var))
     #       = -k * log(det(prec))  [for diagonal case]
     #       = -k * log(prod(prec)) = -k * sum(log(prec))
-    # --> neg entropy = error = k * sum(log(prec)) (low variance --> high precision --> high erro)
+    # --> neg entropy = error = k * sum(log(prec)) (low variance --> high precision --> high error)
     neg_ent = tf.math.reduce_sum(tf.math.log(pi_new_precision), axis=1)
-    return vf_scale * l_vf - l_clip + entropy_scale * neg_ent, prob_ratio
+    return -1. * l_clip, neg_ent, prob_ratio
