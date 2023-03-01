@@ -6,7 +6,7 @@ from typing import List, Dict
 from unittest import TestCase
 from tensorflow.keras.layers import Dense, Layer
 from frameworks.layer_signatures import ScalarStateModel, VectorStateModel, DistroStateModel
-from agents.ppo_agents import PPODiscrete, PPOContinuous
+from agents.ppo_agents import PPODiscrete, PPOContinuous, calculate_vpred, calculate_vpred_end
 
 
 # utils
@@ -36,7 +36,7 @@ def fake_reward_statecorr(state: Dict[str, np.ndarray], action: np.ndarray,
     return pos_reward - neg_reward
 
 
-# models
+# Model Components
 
 
 class DistroMod(Layer):
@@ -74,6 +74,42 @@ class Critic(Layer):
     def call(self, state_t: List[tf.Tensor]) -> tf.Tensor:
         v = [l(si) for l, si in zip(self.layers, state_t)]
         return tf.math.reduce_sum(tf.add_n(v), axis=1)
+
+
+class MeanCritic(Layer):
+    def __init__(self):
+        super(MeanCritic, self).__init__()
+
+    def call(self, state_t: List[tf.Tensor]) -> tf.Tensor:
+        vmu = [tf.math.reduce_mean(st, axis=1) for st in state_t]
+        return tf.add_n(vmu) / len(state_t)
+
+
+# Testers
+
+
+class TestUtilities(TestCase):
+
+    def test_vpred(self):
+        MC = VectorStateModel(MeanCritic())
+        a = np.array([[1., 1.],
+                      [2., 2.],
+                      [3., 3.]])
+        b = a + 100.
+        states = [{"B": b, "A": a}]
+        vpred = calculate_vpred(MC, states, ["A", "B"])
+        self.assertTrue(len(vpred) == 1)  # 1 trajectory
+        self.assertTrue(np.all(vpred[0] == np.array([51., 52., 53.])))
+
+    def test_vpred_end(self):
+        MC = VectorStateModel(MeanCritic())
+        a = np.array([[1., 1.],
+                      [2., 2.],
+                      [3., 3.]])
+        b = a + 100.
+        states = [{"B": b, "A": a}]
+        vpred = calculate_vpred_end(MC, states, ["A", "B"])
+        self.assertEqual(vpred, [53.0])
 
 
 class TestDiscreteAgent(TestCase):
@@ -184,9 +220,12 @@ class TestContinuousAgent(TestCase):
 
 
 if __name__ == "__main__":
+    T = TestUtilities()
+    T.test_vpred()
+    T.test_vpred_end()
     T = TestDiscreteAgent()
     T.setUp()
     T.train_statecorr()
-    # T2 = TestContinuousAgent()
-    # T2.setUp()
-    # T2.train_statecorr()
+    T2 = TestContinuousAgent()
+    T2.setUp()
+    T2.train_statecorr()

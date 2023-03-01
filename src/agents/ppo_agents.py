@@ -12,6 +12,9 @@ from frameworks.ppo import package_dataset, ppo_loss_multiclass, ppo_loss_gauss,
 from frameworks.custom_model import CustomModel
 
 
+# Shared Utilities
+
+
 def copy_model(send_model: Layer, rec_model: Layer,
                tau: float):
     # copy weights from send_model to rec_model
@@ -22,6 +25,58 @@ def copy_model(send_model: Layer, rec_model: Layer,
     for send, rec in zip(send_weights, rec_weights):
         new_weights.append(tau * send + (1 - tau) * rec)
     rec_model.set_weights(new_weights)
+
+
+def calculate_vpred(critic: VectorStateModel, states: List[Dict[str, np.ndarray]],
+                    state_names: List[str]):
+    # TODO: tf.function?
+    # Vpred = predicted value function = critic output
+    # Returns: critic evals = List[np.ndarray]
+    #               array for each trajectory
+    V = []
+    # iter thru trajectories:
+    for traj in states:
+        V_traj = []
+        # iter thru windows within a trajectory:
+        for win_start in range(0, np.shape(traj[state_names[0]])[0], 32):
+            # uses self.state_names to sync ordering
+            state_wins = [traj[k][win_start:win_start+32] for k in state_names]
+            V_traj.append(critic(state_wins)[0].numpy())
+        V.append(np.concatenate(V_traj, axis=0))
+    return V
+
+
+def calculate_vpred_end(critic: VectorStateModel, states: List[Dict[str, np.ndarray]],
+                        state_names: List[str]):
+    Vend = []
+    for traj in states:
+        state_end = [traj[k][-1:] for k in state_names]
+        Vend.append(critic(state_end)[0][0].numpy())
+    return Vend
+
+
+def test_layersigs(test_model, dset: tf.data.Dataset):
+    # check the test bits
+    for v in dset.batch(16):
+        vout = test_model(v)
+        for k in vout:
+            assert vout[k].numpy()
+        break
+
+
+def save_weights(directory_location: str, layers: List[Layer], names: List[str]):
+    for ly, ln in zip(layers, names):
+        np.savez(os.path.join(directory_location, ln + ".npz"), *ly.get_weights())
+
+
+def load_weights(directory_location: str, layers: List[Layer], names: List[str]):
+    for ly, ln in zip(layers, names):
+        dw = np.load(os.path.join(directory_location, ln + ".npz"))
+        wfin = [dw["arr_" + str(i)] for i in range(len(dw))]
+        ly.set_weights(wfin)
+
+
+# Models
 
 
 class PPODiscrete(Agent, TrainEpoch, WeightMate):
@@ -147,38 +202,6 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
             print(act_sel)
         return act_sel
 
-    def _calculate_vpred(self, states: List[Dict[str, np.ndarray]]):
-        # TODO: tf.function?
-        # Vpred = predicted value function = critic output
-        # Returns: critic evals = List[np.ndarray]
-        #               array for each trajectory
-        V = []
-        # iter thru trajectories:
-        for traj in states:
-            V_traj = []
-            # iter thru windows within a trajectory:
-            for win_start in range(0, np.shape(traj[self._sname0])[0], 32):
-                # uses self.state_names to sync ordering
-                state_wins = [traj[k][win_start:win_start+32] for k in self.state_names]
-                V_traj.append(self.critic(state_wins)[0].numpy())
-            V.append(np.concatenate(V_traj, axis=0))
-        return V
-
-    def _calculate_vpred_end(self, states: List[Dict[str, np.ndarray]]):
-        Vend = []
-        for traj in states:
-            state_end = [traj[k][-1:] for k in self.state_names]
-            Vend.append(self.critic(state_end)[0][0].numpy())
-        return Vend
-
-    def _test_layersigs(self, dset: tf.data.Dataset):
-        for v in dset.batch(16):
-            vout = self.test_model(v)
-            for k in vout:
-                assert vout[k].numpy()
-            break
-        self.lsig_test = True
-
     def train(self,
               states: List[Dict[str, np.ndarray]],
               reward: List[np.ndarray],
@@ -215,7 +238,7 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
                 terms2.append(terminated[i])
 
         # first: train critic
-        Vpred_end = self._calculate_vpred_end(states2)
+        Vpred_end = calculate_vpred_end(self.critic, states2, self.state_names)
         critic_dset = package_dataset_critic(states2, rewards2, Vpred_end, terms2, self.gamma, "val")
         # train critic
         self.kmodel_critic.fit(critic_dset.batch(self.train_batch_size),
@@ -223,12 +246,14 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
                                verbose=1)
 
         # second: train actor
-        V = self._calculate_vpred(states2)
+        #   use the updated critic to give updated value function predictions
+        V = calculate_vpred(self.critic, states2, self.state_names)
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         if not self.lsig_test:
-            self._test_layersigs(dset)
+            test_layersigs(self.test_model, dset)
+            self.lsig_test = True
         history = self.kmodel_actor.fit(dset.batch(self.train_batch_size),
                                         epochs=self.train_epoch,
                                         verbose=1)
@@ -238,17 +263,14 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
 
     def save_weights(self, directory_location: str):
         # get_weights --> List[np.ndarray]
-        np.savez(os.path.join(directory_location, "actor_weights.npz"), *self.pi_new.layer.get_weights())
-        np.savez(os.path.join(directory_location, "critic_weights.npz"), *self.critic.layer.get_weights())
+        save_weights(directory_location,
+                     [self.pi_new.layer, self.critic.layer],
+                     ["actor_weights", "critic_weights"])
 
     def load_weights(self, directory_location: str):
-        d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
-        actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
-        self.pi_new.layer.set_weights(actor_weights)
-        self.pi_old.layer.set_weights(actor_weights)  # TODO: necessary?
-        d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
-        critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
-        self.critic.layer.set_weights(critic_weights)
+        load_weights(directory_location,
+                     [self.pi_new.layer, self.pi_old.layer, self.critic.layer],
+                     ["actor_weights", "actor_weights", "critic_weights"])
 
 
 class PPOContinuous(Agent, TrainEpoch):
@@ -259,7 +281,6 @@ class PPOContinuous(Agent, TrainEpoch):
                  action_bounds: List[Tuple[float]],
                  state_dims: Dict[str, Tuple[int]],
                  eta: float = 0.2,
-                 vf_scale: float = 1.,
                  entropy_scale: float = .01,
                  gamma: float = 0.99,
                  lam: float = 1.,
@@ -278,7 +299,6 @@ class PPOContinuous(Agent, TrainEpoch):
                 each action dimension
             state_dims (Dict[str, Tuple[int]]): mapping of state names to state dims
             eta (float, optional): ppo clipping discount. Defaults to 0.2.
-            vf_scale (float, optional): critic error regularization strength. Defaults to 1.
             entropy_scale (float, optional): entropy regularization strength. Defaults to .01.
             gamma (float, optional): discount factor. Defaults to 0.99.
             lam (float, optional): generalized discount scale. Defaults to 1..
@@ -305,31 +325,32 @@ class PPOContinuous(Agent, TrainEpoch):
                                  name="adv", dtype=tf.float32),
                   tf.keras.Input(shape=(),  # target value name
                                  name="val", dtype=tf.float32)]
-        inputs = inputs + s0_inputs
 
         # ppo loss
         pi_new = pi_model_builder()
         pi_old = pi_model_builder()
         v_model = value_model_builder()
-        # these lines set state ordering (ordering set internally by state names)
         pi_new_distro, pi_new_test = pi_new(s0_inputs)
         pi_old_distro, pi_old_test = pi_old(s0_inputs)
         critic_pred, critic_test = v_model(s0_inputs)
-        loss, pr_ratio = ppo_loss_gauss(pi_old_distro[:, :len(action_bounds)], pi_old_distro[:, len(action_bounds):],
-                              pi_new_distro[:, :len(action_bounds)], pi_new_distro[:, len(action_bounds):],
-                              critic_pred,
-                              inputs[0], inputs[1], inputs[2],
-                              eta, vf_scale, entropy_scale)
+        loss_actor, negent, pr_ratio = ppo_loss_gauss(pi_old_distro[:, :len(action_bounds)], pi_old_distro[:, len(action_bounds):],
+                                                      pi_new_distro[:, :len(action_bounds)], pi_new_distro[:, len(action_bounds):],
+                                                      inputs[0], inputs[1], eta)
+        loss_critic = value_loss(critic_pred, inputs[2])
         # primary model
-        self.kmodel = CustomModel("loss",
-                                  inputs=inputs,
-                                  outputs={"loss": tf.math.reduce_mean(loss),
-                                           "pr_ratio": pr_ratio,
-                                           "new_distro": pi_new_distro,
-                                           "old_distro": pi_old_distro})
-        self.kmodel.compile(tf.keras.optimizers.Adam(learning_rate))
+        self.kmodel_actor = CustomModel("loss",
+                                        inputs=s0_inputs + inputs[:2],
+                                        outputs={"loss": tf.math.reduce_mean(loss_actor) + entropy_scale * tf.math.reduce_mean(negent),
+                                                 "pr_ratio": pr_ratio,
+                                                 "new_distro": pi_new_distro,
+                                                 "old_distro": pi_old_distro})
+        self.kmodel_actor.compile(tf.keras.optimizers.Adam(learning_rate))
+        self.kmodel_critic = CustomModel("loss",
+                                         inputs=s0_inputs + inputs[2:],
+                                         outputs={"loss": tf.math.reduce_mean(loss_critic)})
+        self.kmodel_critic.compile(tf.keras.optimizers.Adam(learning_rate))
         # testing model
-        self.test_model = Model(inputs=inputs,
+        self.test_model = Model(inputs=s0_inputs + inputs,
                                 outputs={"pi_new_test": pi_new_test,
                                          "pi_old_test": pi_old_test,
                                          "critic_test": critic_test})
@@ -383,31 +404,7 @@ class PPOContinuous(Agent, TrainEpoch):
 
         return sample
 
-    # TODO: this is predicted V... is that correct?
-    def _calculate_v(self, states: List[Dict[str, np.ndarray]]):
-        # TODO: move to function outside of class?
-        # Returns: critic evals = List[np.ndarray]
-        #               array for each trajectory
-        V = []
-        # iter thru trajectories:
-        for traj in states:
-            V_traj = []
-            # iter thru windows within a trajectory:
-            for win_start in range(0, np.shape(traj[self._sname0])[0], 32):
-                # uses self.state_names to sync ordering
-                state_wins = [traj[k][win_start:win_start+32] for k in self.state_names]
-                V_traj.append(self.critic(state_wins)[0].numpy())
-            V.append(np.concatenate(V_traj, axis=0))
-        return V
-
-    def _test_layersigs(self, dset: tf.data.Dataset):
-        for v in dset.batch(16):
-            vout = self.test_model(v)
-            print(vout)
-            for k in vout:
-                assert vout[k].numpy()
-            break
-        self.lsig_test = True
+    # TODO: finish below here!
 
     def train(self,
               states: List[Dict[str, np.ndarray]],
@@ -444,32 +441,37 @@ class PPOContinuous(Agent, TrainEpoch):
                 rewards2.append(reward[i])
                 terms2.append(terminated[i])
 
-        # TODO: calculate v --> train critic --> recalculate v
+        # first: train critic
+        Vpred_end = calculate_vpred_end(self.critic, states2, self.state_names)
+        critic_dset = package_dataset_critic(states2, rewards2, Vpred_end, terms2, self.gamma, "val")
+        # train critic
+        self.kmodel_critic.fit(critic_dset.batch(self.train_batch_size),
+                               epochs=self.train_epoch,
+                               verbose=1)
 
-        V = self._calculate_v(states2)
+        # second: train actor
+        #   use the updated critic to give updated value function predictions
+        V = calculate_vpred(self.critic, states2, self.state_names)
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
         if not self.lsig_test:
-            self._test_layersigs(dset)
-        history = self.kmodel.fit(dset.batch(self.train_batch_size),
-                                  epochs=self.train_epoch,
-                                  verbose=0)
-
+            test_layersigs(self.test_model, dset)
+            self.lsig_test = True
+        history = self.kmodel_actor.fit(dset.batch(self.train_batch_size),
+                                        epochs=self.train_epoch,
+                                        verbose=1)
         # copy update actor to old actor
         copy_model(self.pi_new.layer, self.pi_old.layer, 1.)
         return history
 
     def save_weights(self, directory_location: str):
         # get_weights --> List[np.ndarray]
-        np.savez(os.path.join(directory_location, "actor_weights.npz"), *self.pi_new.layer.get_weights())
-        np.savez(os.path.join(directory_location, "critic_weights.npz"), *self.critic.layer.get_weights())
+        save_weights(directory_location,
+                     [self.pi_new.layer, self.critic.layer],
+                     ["actor_weights", "critic_weights"])
 
     def load_weights(self, directory_location: str):
-        d_actor = np.load(os.path.join(directory_location, "actor_weights.npz"))
-        actor_weights = [d_actor["arr_" + str(i)] for i in range(len(d_actor))]
-        self.pi_new.layer.set_weights(actor_weights)
-        self.pi_old.layer.set_weights(actor_weights)  # TODO: necessary?
-        d_critic = np.load(os.path.join(directory_location, "critic_weights.npz"))
-        critic_weights = [d_critic["arr_" + str(i)] for i in range(len(d_critic))]
-        self.critic.layer.set_weights(critic_weights)
+        load_weights(directory_location,
+                     [self.pi_new.layer, self.pi_old.layer, self.critic.layer],
+                     ["actor_weights", "actor_weights", "critic_weights"])
