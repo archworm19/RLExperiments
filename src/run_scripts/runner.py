@@ -17,6 +17,7 @@ def simple_run(env: gym.Env,
                debug: bool = False,
                discrete: bool = True):
     # TODO: docstring ~ return types
+    # TODO: should probably take in state names
     # NOTE: if discrete --> assumes 1-hot input
     action = agent.init_action()[0]
     if discrete:

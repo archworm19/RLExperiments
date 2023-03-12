@@ -209,7 +209,10 @@ def build_continuous_ppo(env: EnvsContinuous,
                          train_batch_size: int = 64,
                          learning_rate: float = .001,
                          train_epoch: int = 8,
-                         init_var: float = 1.5):  # initial variance (diagonal covariance elems)
+                         init_var: float = 1.5, # initial variance (diagonal covariance elems)
+                         min_var: float = 0.1,
+                         max_var: float = 1.5):
+    assert max_var >= min_var
     # states: 1. dim defined by env
     # build environment
     env_run, env_disp = _build_env(env.value)
@@ -217,7 +220,7 @@ def build_continuous_ppo(env: EnvsContinuous,
         return ScalarStateModel(DenseScalarState([embed_dim], layer_sizes, drop_rate))
     def build_pi():
         return VectorStateModel(DenseGaussState(env.value.action_bounds, [embed_dim], layer_sizes, drop_rate,
-                               init_prec=1. / init_var, min_prec=1. / init_var, max_prec=8.0))
+                               init_prec=1. / init_var, min_prec=1. / max_var, max_prec= 1. / min_var))
     agent = PPOContinuous(build_pi, build_critic,
                           env.value.action_bounds, {"core_state": (env.value.dims_obs,)},
                           eta, entropy_scale, gamma, lam,

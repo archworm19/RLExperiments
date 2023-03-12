@@ -108,7 +108,10 @@ def ll_run_and_train_queue(builder: Callable,  # --> env_run, env_viz, agent
         procs.append(p)
         conns.append(parent_conn)
     # build agent for training:
-    _, env_viz, agent = builder()
+    env_run, env_viz, agent = builder()
+    # only visualize if viz_debug set
+    if not viz_debug:
+        env_viz = env_run
     # save weights
     agent.save_weights(weight_directory)
 
@@ -167,9 +170,15 @@ if __name__ == "__main__":
     # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
     #                                                vf_scale=.1, entropy_scale=0.1, eta=0.3, layer_sizes=[128, 64])
     # num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
+    # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.bi_walker,
+    #                                                gamma=0.95, lam=0.95,
+    #                                                learning_rate=.0005,
+    #                                                entropy_scale=0.1, eta=0.3, layer_sizes=[512, 128, 64],
+    #                                                min_var=0.1, max_var=1., init_var=1.)
+    # num_actions = len(EnvsContinuous.bi_walker.value.action_bounds)
     # discrete_mode = False
 
-    # run_and_train(env_run, env_viz, agent, num_actions, 40, 5000, 500, 500, viz_debug=False, discrete_mode=discrete_mode)
+    # run_and_train(env_run, env_viz, agent, num_actions, 400, 5000, 1000, 1000, viz_debug=False, discrete_mode=discrete_mode)
 
     # parallel + queue
     # builder = partial(build_discrete_ppo, env=EnvsDiscrete.cartpole)
@@ -177,6 +186,12 @@ if __name__ == "__main__":
     # ll_run_and_train_queue(builder, 4, 'weights/', 50, 4000, 500, 500, 42, discrete_mode=True, viz_debug=False)
     # builder = partial(build_continuous_ppo, env=EnvsContinuous.pendulum, init_var=1., learning_rate=.0001,
     #                         vf_scale=.1, entropy_scale=0.0, eta=0.3)
-    builder = partial(build_continuous_ppo, EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
-                            entropy_scale=.01, eta=0.3, layer_sizes=[128, 64])
-    ll_run_and_train_queue(builder, 4, 'weights/', 50, 4000, 500, 500, 42, discrete_mode=False, viz_debug=False)
+    # builder = partial(build_continuous_ppo, EnvsContinuous.lunar_continuous, init_var=1., learning_rate=.0005,
+    #                         entropy_scale=.01, eta=0.3, layer_sizes=[128, 64])
+    builder = partial(build_continuous_ppo, EnvsContinuous.bi_walker,
+                            gamma=0.95, lam=0.95,
+                            learning_rate=.0005,
+                            entropy_scale=0.0, eta=0.2, layer_sizes=[512, 256, 128],
+                            min_var=0.1, max_var=1., init_var=1.,
+                            train_batch_size=128)
+    ll_run_and_train_queue(builder, 4, 'weights/', 800, 4000, 1000, 1000, 42, discrete_mode=False, viz_debug=False)
