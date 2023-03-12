@@ -2,7 +2,6 @@
     PPO paper: Proximal Policy Optimization Algorithms
         Schulman et al, 2017
 """
-from tkinter import E
 import tensorflow as tf
 import numpy as np
 from typing import List, Dict
@@ -237,13 +236,25 @@ def value_loss(critic_pred: tf.Tensor, value_target: tf.Tensor):
     return tf.math.pow(critic_pred - value_target, 2.)
 
 
+def _calc_precision(log_std_dev: tf.Tensor):
+    # log_std_dev = log(standard deviation)
+    #  shape must be:
+    #       batch_size x d (diagonal covariance case)
+    # convert to precision (1 / covariance)
+    std_dev = tf.math.exp(log_std_dev)
+    covar = tf.math.pow(std_dev, 2.)
+    return tf.math.divide(1., covar)
+
+
 def _gauss_prob_ratio2(x: tf.Tensor,
-                       mu_num: tf.Tensor, prec_num: tf.Tensor,
-                       mu_denom: tf.Tensor, prec_denom: tf.Tensor):
-    # num = numerator; denom = denominator; prec=precision
-    # all shapes assumed to be batch_size x action_dims
-    # det(var) for diagonal = product of diagonals
+                       mu_num: tf.Tensor, log_std_dev_num: tf.Tensor,
+                       mu_denom: tf.Tensor, log_std_dev_denom: tf.Tensor):
+    # num = numerator; denom = denominator;
+    # mu = mean = must be batch_size x action_dims
+    # log_std_dev = must be batch_size x action_dims
     # NOTE: computes exp(log(gaussian ratios))
+    prec_num = _calc_precision(log_std_dev_num)
+    prec_denom = _calc_precision(log_std_dev_denom)
     log_det = 0.5 * tf.math.reduce_sum(tf.math.log(prec_num) - tf.math.log(prec_denom), axis=1)
     diff_num = x - mu_num
     log_exp_num = (-0.5) * tf.math.reduce_sum(diff_num * prec_num * diff_num, axis=1)
@@ -252,8 +263,8 @@ def _gauss_prob_ratio2(x: tf.Tensor,
     return tf.math.exp(log_det + log_exp_num - log_exp_denom)
 
 
-def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
-                   pi_new_mu: tf.Tensor, pi_new_precision: tf.Tensor,
+def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_log_std_dev: tf.Tensor,
+                   pi_new_mu: tf.Tensor, pi_new_log_std_dev: tf.Tensor,
                    action: tf.Tensor,
                    advantage: tf.Tensor,
                    eta: float):
@@ -262,10 +273,10 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
     Args:
         pi_old_mu (tf.Tensor): mean outputs by old actor
             shape = batch_size x action_dims
-        pi_old_precision (tf.Tensor): 1/variance output by old actor
+        pi_old_log_std_dev (tf.Tensor): log(standard deviation) output by old actor
             shape = batch_size x action_dims = diagonal covar
         pi_new_mu (tf.Tensor):
-        pi_new_precision (tf.Tensor):
+        pi_new_log_std_dev (tf.Tensor):
         action (tf.Tensor): one-hot actions
             shape = batch_size x num_actions
         advantage (tf.Tensor): estimated advantage
@@ -279,13 +290,14 @@ def ppo_loss_gauss(pi_old_mu: tf.Tensor, pi_old_precision: tf.Tensor,
             all shapes = batch_size
     """
     prob_ratio = _gauss_prob_ratio2(action,
-                                    pi_new_mu, pi_new_precision,
+                                    pi_new_mu, pi_new_log_std_dev,
                                     tf.stop_gradient(pi_old_mu),
-                                    tf.stop_gradient(pi_old_precision))
+                                    tf.stop_gradient(pi_old_log_std_dev))
     l_clip = clipped_surrogate_likelihood(prob_ratio, advantage, eta)
     # entropy for gaussian with diagonal covar = k * log(det(var))
-    #       = -k * log(det(prec))  [for diagonal case]
-    #       = -k * log(prod(prec)) = -k * sum(log(prec))
-    # --> neg entropy = error = k * sum(log(prec)) (low variance --> high precision --> high error)
-    neg_ent = tf.math.reduce_sum(tf.math.log(pi_new_precision), axis=1)
-    return -1. * l_clip, neg_ent, prob_ratio
+    #       = k * log(prod(var)) cuz diagonal
+    #       = k * log(prod(std_dev^2)) cuz diagonal
+    #       = k * sum [ log(std_dev_i ^ 2) ]
+    #       = 2k * sum [ log(std_dev_i) ]
+    ent = tf.math.reduce_sum(pi_new_log_std_dev, axis=1)
+    return -1. * l_clip, -1. * ent, prob_ratio

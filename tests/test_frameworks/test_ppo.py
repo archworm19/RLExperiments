@@ -132,19 +132,21 @@ class TestLosses(TestCase):
         # seems like multivariate_normal can figure out how to use diagonal covar
         N = 10
         mu = rng.random((N, 2))
-        var = rng.random((N, 2))
+        log_std = rng.random((N, 2))
         mu2 = rng.random((N, 2))
-        var2 = rng.random((N, 2))
+        log_std2 = rng.random((N, 2))
         x = rng.random((N, 2))
         tf_ratio = _gauss_prob_ratio2(tf.constant(x, dtype=tf.float32),
                                     tf.constant(mu, dtype=tf.float32),
-                                    1. / tf.constant(var, dtype=tf.float32),
+                                    tf.constant(log_std, dtype=tf.float32),
                                     tf.constant(mu2, dtype=tf.float32),
-                                    1. / tf.constant(var2, dtype=tf.float32))
+                                    tf.constant(log_std2, dtype=tf.float32))
         for i in range(N):
-            ratio = multivariate_normal.pdf(x[i:i+1], mu[i], var[i]) / multivariate_normal.pdf(x[i:i+1], mu2[i], var2[i])
+            var = np.exp(log_std[i])**2.
+            var2 = np.exp(log_std2[i])**2.
+            ratio = multivariate_normal.pdf(x[i:i+1], mu[i], var) / multivariate_normal.pdf(x[i:i+1], mu2[i], var2)
             diff = np.fabs(tf_ratio[i].numpy() - ratio)
-            self.assertTrue(diff < .001)
+            self.assertTrue(diff < .00001)
 
     def test_multiclass_loss(self):
         # ppo loss multiclass test
@@ -197,8 +199,8 @@ class TestLosses(TestCase):
         action = tf.constant(rng.random((8, 2)), dtype=tf.float32)
         advantage = tf.constant([1., -1.] * 2 + [-1., 1.] * 2, dtype=tf.float32)
         eta = 0.3  # step size
-        # everybody uses same precision
-        prec = tf.ones([8, 2], dtype=tf.float32)
+        # everybody uses same log_std
+        log_std = tf.ones([8, 2], dtype=tf.float32)
         # base model
         mu_base = action + 0.25 * tf.constant(rng.random((8, 2)), dtype=tf.float32)
         # good model ~ move mean towards action if advantage positive (away if neg)
@@ -206,9 +208,9 @@ class TestLosses(TestCase):
         # bad model ~ wrong direction
         mu_bad = mu_base - (action - mu_base) * advantage[:, None]
 
-        loss_good, _, pr_good = ppo_loss_gauss(mu_base, prec, mu_good, prec,
+        loss_good, _, pr_good = ppo_loss_gauss(mu_base, log_std, mu_good, log_std,
                                                action, advantage, eta)
-        loss_bad, _, pr_bad = ppo_loss_gauss(mu_base, prec, mu_bad, prec,
+        loss_bad, _, pr_bad = ppo_loss_gauss(mu_base, log_std, mu_bad, log_std,
                                              action, advantage, eta)
         print(loss_good)
         print(loss_bad)
@@ -216,11 +218,10 @@ class TestLosses(TestCase):
         self.assertTrue(tf.math.reduce_mean(loss_good) < tf.math.reduce_mean(loss_bad))
 
         # test (neg)entropy
-        # low precision --> high covariance --> high entropy --> low negentropy
-        _, negent_low, _ = ppo_loss_gauss(mu_base, prec, mu_good, prec,
+        # high covariance --> high entropy --> low negentropy
+        _, negent_hi, _ = ppo_loss_gauss(mu_base, log_std, mu_good, log_std,
                                           action, advantage, eta)
-        prec_hi = 2. * prec
-        _, negent_hi, _ = ppo_loss_gauss(mu_base, prec, mu_good, prec_hi,
+        _, negent_low, _ = ppo_loss_gauss(mu_base, log_std, mu_good, log_std * 2.,
                                          action, advantage, eta)
         self.assertTrue(tf.math.reduce_all(negent_hi > negent_low))
 

@@ -293,7 +293,7 @@ class PPOContinuous(Agent, TrainEpoch):
                 ASSUMES: actor model outputs gaussian distribution
                         = batch_size x (2 * action_dims)
                             first set of action dims = mean
-                            second set = diagonal of precision matrix
+                            second set = diagonal of log(std_dev) matrix
             value_model_builder (Callable[[], ScalarStateModel]): critic model builder
             action_bounds (List[Tuple[float]]): (lower bound, upper bound) pairs for
                 each action dimension
@@ -388,23 +388,20 @@ class PPOContinuous(Agent, TrainEpoch):
         # --> shape = concat[mus, precisions]
         g = self.pi_new(state_ord)[0][0].numpy()
         mus = g[:len(self.action_bounds)]
-        precs = g[len(self.action_bounds):]
-        # since diagonal --> can just invert to get covar
-        covar = 1. / precs
+        log_std_dev = g[len(self.action_bounds):]
         # sample from gaussian
-        sample = self.rng.normal(mus, np.sqrt(covar), size=(1, len(mus)))
+        sample = self.rng.normal(mus, np.exp(log_std_dev), size=(1, len(mus)))
         ab = np.array(self.action_bounds)
-        sample = np.clip(sample, ab[:, 0], ab[:, 1])
+        sample_clip = np.clip(sample, ab[:, 0], ab[:, 1])
 
         if debug:
-            print('mean, covar, and sample')
+            print('mean, log_std_dev, and sample')
             print(mus)
-            print(covar)
+            print(log_std_dev)
             print(sample)
+            print(sample_clip)
 
-        return sample
-
-    # TODO: finish below here!
+        return sample_clip
 
     def train(self,
               states: List[Dict[str, np.ndarray]],
@@ -447,7 +444,7 @@ class PPOContinuous(Agent, TrainEpoch):
         # train critic
         self.kmodel_critic.fit(critic_dset.batch(self.train_batch_size),
                                epochs=self.train_epoch,
-                               verbose=1)
+                               verbose=0)
 
         # second: train actor
         #   use the updated critic to give updated value function predictions
@@ -455,12 +452,15 @@ class PPOContinuous(Agent, TrainEpoch):
         dset = package_dataset(states2, V, rewards2, actions2, terms2,
                                self.gamma, self.lam,
                                adv_name="adv", val_name="val", action_name="action")
+
+        # test model construction
         if not self.lsig_test:
             test_layersigs(self.test_model, dset)
             self.lsig_test = True
+
         history = self.kmodel_actor.fit(dset.batch(self.train_batch_size),
                                         epochs=self.train_epoch,
-                                        verbose=1)
+                                        verbose=0)
         # copy update actor to old actor
         copy_model(self.pi_new.layer, self.pi_old.layer, 1.)
         return history
