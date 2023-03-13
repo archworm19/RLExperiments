@@ -73,6 +73,24 @@ class TestDatasetGen(TestCase):
         advs = advantage_conv(v, r, self.gamma, lam, terminated=True)
         self.assertTrue(np.all(advs == exp_advs))
 
+    def test_0advantage(self):
+        # design a case where there should
+        #       be no advantage anywhere
+        # case 1: lambda = 1 --> v(t) = sum [gamma*i r(t + i)]
+        rng = npr.default_rng(0)
+        r = (rng.random(50) - 0.5) * 20.
+        vend = rng.random()
+        rv2 = np.hstack((r, [vend]))
+        gamma_mask = self.gamma**(np.arange(51))
+        v_gen = []
+        for i in range(50):
+            vi = np.sum(rv2[i:] * gamma_mask[:51-i])
+            v_gen.append(vi)
+        advs = advantage_conv(np.array(v_gen + [vend]), r, self.gamma, 1., terminated=False)
+        self.assertTrue(np.amax(np.fabs(advs)) < 1e-7)
+
+        # TODO: test with lambda != 1
+
     def test_value_target(self):
         # value estimate?
         val = value_conv(self.V[-1], self.reward, self.gamma)
@@ -231,6 +249,7 @@ if __name__ == "__main__":
     T.test_loss()
     T = TestDatasetGen()
     T.setUp()
+    T.test_0advantage()
     T.test_advantage_spec()
     T.test_value_spec()
     T.test_advantage()
