@@ -201,7 +201,7 @@ def build_discrete_ppo(env: EnvsDiscrete,
 def build_continuous_ppo(env: EnvsContinuous,
                          embed_dim: int = 4,
                          layer_sizes: List[int] = [64, 32],
-                         drop_rate: float = 0.05,
+                         drop_rate: float = 0.0,
                          gamma: float = 0.99,
                          eta: float = 0.3,  # clip hyperparam
                          entropy_scale: float = 0.,  # regularization param for action entropy
@@ -209,10 +209,8 @@ def build_continuous_ppo(env: EnvsContinuous,
                          train_batch_size: int = 64,
                          learning_rate: float = .001,
                          train_epoch: int = 8,
-                         init_var: float = 1.5, # initial variance (diagonal covariance elems)
-                         min_var: float = 0.1,
-                         max_var: float = 1.5):
-    assert max_var >= min_var
+                         init_std_dev: float = 1.,  # initial standard deviation
+                         scale_std_dev: float = 1.):
     # states: 1. dim defined by env
     # build environment
     env_run, env_disp = _build_env(env.value)
@@ -220,7 +218,7 @@ def build_continuous_ppo(env: EnvsContinuous,
         return ScalarStateModel(DenseScalarState([embed_dim], layer_sizes, drop_rate))
     def build_pi():
         return VectorStateModel(DenseGaussState(env.value.action_bounds, [embed_dim], layer_sizes, drop_rate,
-                               init_prec=1. / init_var, min_prec=1. / max_var, max_prec= 1. / min_var))
+                                                np.log(init_std_dev), scale_std_dev))
     agent = PPOContinuous(build_pi, build_critic,
                           env.value.action_bounds, {"core_state": (env.value.dims_obs,)},
                           eta, entropy_scale, gamma, lam,

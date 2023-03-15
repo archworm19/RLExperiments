@@ -243,7 +243,7 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         # train critic
         self.kmodel_critic.fit(critic_dset.batch(self.train_batch_size),
                                epochs=self.train_epoch,
-                               verbose=1)
+                               verbose=0)
 
         # second: train actor
         #   use the updated critic to give updated value function predictions
@@ -256,7 +256,7 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
             self.lsig_test = True
         history = self.kmodel_actor.fit(dset.batch(self.train_batch_size),
                                         epochs=self.train_epoch,
-                                        verbose=1)
+                                        verbose=0)
         # copy update actor to old actor
         copy_model(self.pi_new.layer, self.pi_old.layer, 1.)
         return history
