@@ -279,11 +279,12 @@ if __name__ == "__main__":
                                                    entropy_scale=0.0, eta=0.15,
                                                    embed_dim=64,
                                                    layer_sizes=[256, 128, 64],
-                                                   scale_std_dev=.05)
+                                                   scale_std_dev=.1)
     num_actions = len(EnvsContinuous.bi_walker.value.action_bounds)
     discrete_mode = False
 
-    run_and_train(env_run, env_viz, agent, num_actions, 400, 10000, 1000, 2500, viz_debug=True, discrete_mode=discrete_mode)
+    solve_t = 1600
+    run_and_train(env_run, env_viz, agent, num_actions, 400, int(solve_t * 10), solve_t, solve_t, viz_debug=True, discrete_mode=discrete_mode)
 
     # parallel + queue
     # builder = partial(build_discrete_ppo, env=EnvsDiscrete.cartpole)
