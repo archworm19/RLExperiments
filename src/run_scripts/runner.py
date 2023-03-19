@@ -1,9 +1,6 @@
 """Running Gym Simulations"""
-import pickle
 import gymnasium as gym
 import numpy as np
-import numpy.random as npr
-from multiprocessing import connection, Queue
 from frameworks.agent import Agent, TrainOnLine
 
 
@@ -12,31 +9,6 @@ from frameworks.agent import Agent, TrainOnLine
 
 class AgentOnLine(Agent, TrainOnLine):
     pass
-
-
-def run_step_continuous(pid: int,
-                        env: gym.Env,
-                        rng: npr.Generator,
-                        conn: connection.Connection,
-                        queue: Queue,
-                        max_run_length: int):
-    # TODO: use this for running environment in a different
-    #   process than the model
-    # TODO: stop signal? ~ wait till connection shutdown?
-    # writes [pid, new_state, reward, termination bit] to queue
-    rl = 0
-    while True:
-        # TODO: unpickle?
-        action = conn.recv()
-        step_output = env.step(action)
-        new_state = step_output[0]
-        reward = step_output[1]
-        term = step_output[2]
-        queue.put(pickle.dumps([pid, new_state, reward, term]), block=True)
-        rl += 1
-        if term or rl >= max_run_length:
-            env.reset(seed=int(rng.integers(10000)))
-            rl = 0
 
 
 def simple_run(env: gym.Env,

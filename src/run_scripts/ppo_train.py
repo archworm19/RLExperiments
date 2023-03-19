@@ -5,7 +5,7 @@ import numpy.random as npr
 from typing import Callable
 from multiprocessing import connection, Process, Pipe, Queue
 from functools import partial
-from run_scripts.runner import simple_run, run_step_continuous
+from run_scripts.runner import simple_run
 from run_scripts.builders import EnvsDiscrete, EnvsContinuous, build_discrete_ppo, build_continuous_ppo
 
 
@@ -175,81 +175,6 @@ def ll_run_and_train_queue(builder: Callable,  # --> env_run, env_viz, agent
         p.join()
 
 
-# TODO: simpler process model
-#   envs run in processes and model runs in main process
-#   makes sense if model is super beefy
-
-
-# class SeqDataStore:
-#     # TODO: this needs a ton of testing...
-
-#     def __init__(self, num_procs: int, T: int, state_dims: int, action_dims: int):
-#         # TODO: only works with single state for the moment
-#         self.T = T
-#         self.state_dims = state_dims
-#         self.action_dims = action_dims
-#         self._dat_state = np.zeros((num_procs, T, state_dims), dtype=np.float32)
-#         self._dat_action = np.zeros((num_procs, T, action_dims), dtype=np.float32)
-#         # trail tuple for each process id = (t0, cur_t, has trial terminated yet?)
-#         self._ptrs = [[-1, -1, False] for _ in range(num_procs)]
-#         self._old_ptrs = []  # (pid, t0, tend, terminated?)
-
-#     def add_datapt(self, process_idx: int, state, action, termination_bit):
-#         ptr = self._ptrs[process_idx]
-#         # check if current ptr has terminated
-#         if ptr[2]:
-#             self._old_ptrs.append([process_idx] + ptr)
-#             # add new info under new ptr
-#             new_ptr = [ptr[1] + 1, ptr[1] + 1, termination_bit]
-#             self._dat_state[process_idx, ptr[1] + 1] = state
-#             self._dat_action[process_idx, ptr[1] + 1] = action
-#             self._ptrs[process_idx] = new_ptr
-#         else:
-#             self._dat_state[process_idx, ptr[1] + 1] = state
-#             self._dat_action[process_idx, ptr[1] + 1] = action
-#             ptr[1] += 1
-#             ptr[2] = termination_bit
-
-#     def pull_data(self):
-#         cptrs = [[i] + self._ptrs[i] for i in range(self._ptrs)]
-#         ret_states, ret_actions, terms = [], [], []
-#         for ptr in self._old_ptrs + cptrs:
-#             pid = ptr[0]
-#             ret_states.append(self._dat_state[pid, ptr[1]:ptr[2]+1])
-#             ret_actions.append(self._dat_action[pid, ptr[1]:ptr[2]+1])
-#             terms.append(ptr[3])
-#         return ret_states, ret_actions, terms
-            
-
-# def _start_procs(env_builder: Callable, num_procs: int, max_run_length: int):
-#     # starts up processes running run_step_continuous
-#     q = Queue(maxsize=100)  # TODO: meaning of maxsize? (in bytes? in elems?)
-#     procs, conns = [], []
-#     for i in range(num_procs):
-#         parent_conn, child_conn = Pipe()
-#         func_target = partial(run_step_continuous,
-#                               pid=i,
-#                               env=env_builder(),
-#                               rng=npr.default_rng(i),
-#                               conn=child_conn,
-#                               queue=q,
-#                               max_run_length=max_run_length)
-#         p = Process(target=func_target)
-#         p.start()
-#         procs.append(p)
-#         conns.append(parent_conn)
-#     return procs, conns, q
-
-
-# TODO: master runner
-# > pull from queue --> get pid
-# > add to active run for given pid ~ handle termination
-# > select action --> send through connection[pid]
-# > train + flush all buffers at end of epoch
-# > TODO: resetting system?
-#       timeout on queue --> queue.Empty exception --> close em --> spin up new procs
-
-
 if __name__ == "__main__":
     # env_run, env_viz, agent = build_discrete_ppo(EnvsDiscrete.cartpole)
     # num_actions = EnvsDiscrete.cartpole.value.dims_actions
@@ -260,30 +185,32 @@ if __name__ == "__main__":
     # discrete_mode = True
 
     # continuous
-    # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.pendulum, gamma=0.95,
-    #                                                learning_rate=.0001,
-    #                                                layer_sizes=[256, 128, 64],
-    #                                                entropy_scale=0.0, eta=0.3)
-    # num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
+    env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.pendulum, gamma=0.95,
+                                                   learning_rate=.0001,
+                                                   layer_sizes=[256, 128, 64],
+                                                   embed_dim=16,
+                                                   entropy_scale=0.0, eta=0.3)
+    num_actions = len(EnvsContinuous.pendulum.value.action_bounds)
+    solve_t=500
     # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.lunar_continuous,
     #                                                gamma=0.95,
     #                                                learning_rate=.0001,
     #                                                entropy_scale=0.0, eta=0.3,
     #                                                layer_sizes=[256, 128, 64])
     # num_actions = len(EnvsContinuous.lunar_continuous.value.action_bounds)
-    env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.bi_walker,
-                                                   gamma=0.95,
-                                                   learning_rate=.00005,
-                                                   train_batch_size=64,
-                                                   train_epoch=10,
-                                                   entropy_scale=0.0, eta=0.15,
-                                                   embed_dim=64,
-                                                   layer_sizes=[256, 128, 64],
-                                                   scale_std_dev=.1)
-    num_actions = len(EnvsContinuous.bi_walker.value.action_bounds)
+    # env_run, env_viz, agent = build_continuous_ppo(EnvsContinuous.bi_walker,
+    #                                                gamma=0.95,
+    #                                                learning_rate=.00005,
+    #                                                train_batch_size=64,
+    #                                                train_epoch=10,
+    #                                                entropy_scale=0.0, eta=0.15,
+    #                                                embed_dim=64,
+    #                                                layer_sizes=[256, 128, 64],
+    #                                                scale_std_dev=.1)
+    # num_actions = len(EnvsContinuous.bi_walker.value.action_bounds)
     discrete_mode = False
 
-    solve_t = 1600
+    # solve_t = 1600
     run_and_train(env_run, env_viz, agent, num_actions, 400, int(solve_t * 10), solve_t, solve_t, viz_debug=True, discrete_mode=discrete_mode)
 
     # parallel + queue

@@ -35,7 +35,19 @@ class TestTrajectoryStore(TestCase):
             self.assertTrue(np.shape(v0)[1] == 2)
             self.assertTrue(np.shape(v1)[1] == 4)
 
+    def test_mix(self):
+        TS = TrajectoryStore(2, 5, [1])
+        TS.add_datapt(0, [np.array([1.])], False)
+        TS.add_datapt(1, [np.array([10.])], False)
+        TS.add_datapt(0, [np.array([2.])], False)
+        TS.add_datapt(1, [np.array([11.])], False)
+        TS.add_datapt(1, [np.array([12.])], False)
+        [x0] = TS.pull_trajectories()
+        self.assertTrue(np.all(x0[0] == np.array([[1.], [2.]])))
+        self.assertTrue(np.all(x0[1] == np.array([[10.], [11.], [12.]])))
+
 
 if __name__ == "__main__":
     TTS = TestTrajectoryStore()
     TTS.test_feedin_feedout()
+    TTS.test_mix()

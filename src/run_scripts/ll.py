@@ -34,6 +34,9 @@ def run_step_continuous(pid: int,
         NOTE: termination bit and end bit are subtly different
             if env reaches max_run_length without termination
                 --> termination bit = False, end bit = True
+        stop vs. reset signals
+            [] --> stop
+            {} --> reset
 
     Args:
         pid (int): process id
@@ -50,7 +53,12 @@ def run_step_continuous(pid: int,
     while True:
         action = pickle.loads(conn.recv())
         if len(action) == 0:  # stop signal
-            break
+            if isinstance(action, list):
+                break
+            else:
+                env.reset(seed=int(rng.integers(10000)))
+                rl = 0
+                continue
         step_output = env.step(action)
         new_state = step_output[0]
         reward = step_output[1]
@@ -86,6 +94,11 @@ def _launch_envs(num_procs: int,
     return procs, conns, q
 
 
+def _reset_envs(conns: List[connection.Connection]):
+    for c in conns:
+        c.send(pickle.dumps({}))
+
+
 def _close_envs(conns: List[connection.Connection],
                 procs: List[Process]):
     for c, p in zip(conns, procs):
@@ -96,7 +109,7 @@ def _close_envs(conns: List[connection.Connection],
 
 
 # TODO: save model periodically...
-def runtrain_onpolicy(num_procs: int,
+def async_master(num_procs: int,
                       env_spec: EnvConfigCont,
                       agent: Agent,
                       num_epoch: int,
@@ -110,26 +123,21 @@ def runtrain_onpolicy(num_procs: int,
     procs, conns, queue = _launch_envs(num_procs, env_spec, run_cutoff)
     for _ in range(num_epoch):
         TS = TrajectoryStore(num_procs, epoch_run_length, dims)
+        # reset environments --> pure on-policy
+        _reset_envs(conns)
         # seed with actions:
         for cn in conns:
             cn.send(pickle.dumps(agent.init_action()[0]))
         for _ in range(epoch_run_length):
             # TODO: option to pull multiple elements from the queue?
             [pid, new_state, reward, term, end_bit] = pickle.loads(queue.get(block=True))
-            print(pid)
-            print(new_state)
-            print(reward)
-            print(term)
-            print(end_bit)
-            input("cont?")
             if term:
                 action = agent.init_action()[0]
             else:
                 action = agent.select_action({state_name: new_state[None]}, False, False)[0]
             conns[pid].send(pickle.dumps(action))
-            TS.add_datapt(pid, [new_state, action, reward, term*1], end_bit)
+            TS.add_datapt(pid, [new_state, action, np.array([reward]), np.array([term*1])], end_bit)
         [tr_states, tr_actions, tr_rewards, tr_terms] = TS.pull_trajectories()
-
         agent.train([{state_name: si} for si in tr_states],
                     [ri[1:,0] for ri in tr_rewards],  # TODO: is this definitely right?
                     [ai[1:] for ai in tr_actions],
@@ -282,17 +290,22 @@ if __name__ == "__main__":
     from run_scripts.builders import  EnvsContinuous, build_continuous_ppo
 
     # async testing
-    # _, _, agent = build_continuous_ppo(EnvsContinuous.pendulum, gamma=0.95,
+    _, _, agent = build_continuous_ppo(EnvsContinuous.pendulum, gamma=0.95,
+                                                   learning_rate=.0001,
+                                                   layer_sizes=[256, 128, 64],
+                                                   embed_dim=16,
+                                                   entropy_scale=0.0, eta=0.3)
+    # _, _, agent = build_continuous_ppo(EnvsContinuous.lunar_continuous,
+    #                                                gamma=0.95,
     #                                                learning_rate=.0001,
-    #                                                layer_sizes=[256, 128, 64],
-    #                                                embed_dim=16,
-    #                                                entropy_scale=0.0, eta=0.3)
-    # test_T = 500
-    # runtrain_onpolicy(4, EnvsContinuous.pendulum.value, agent, 100, int(10*test_T), test_T)
-
-    # sync testing
-    builder = partial(build_continuous_ppo, env=EnvsContinuous.pendulum, learning_rate=.0001,
-                      layer_sizes=[256, 128, 64], embed_dim=16,
-                      entropy_scale=0.0, eta=0.3)
+    #                                                entropy_scale=0.0, eta=0.3,
+    #                                                layer_sizes=[256, 128, 64])
     test_T = 500
-    sync_master(builder, 2, "weights/", 100, int(test_T * 5), test_T, 42, False, True, load_pretrained=True)
+    async_master(2, EnvsContinuous.pendulum.value, agent, 100, int(10*test_T), test_T)
+
+    # # sync testing
+    # builder = partial(build_continuous_ppo, env=EnvsContinuous.pendulum, learning_rate=.0001,
+    #                   layer_sizes=[256, 128, 64], embed_dim=16,
+    #                   entropy_scale=0.0, eta=0.3)
+    # test_T = 500
+    # sync_master(builder, 2, "weights/", 100, int(test_T * 5), test_T, 42, False, True, load_pretrained=True)

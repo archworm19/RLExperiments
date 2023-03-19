@@ -165,7 +165,7 @@ class PPODiscrete(Agent, TrainEpoch, WeightMate):
         """Initial action agent should take
 
         Returns:
-            np.ndarray: len = dims in action space
+            np.ndarray: shape = 1 x action_dims
         """
         ind = self.rng.integers(0, self.num_actions)
         v = np.zeros((1, self.num_actions))
@@ -364,7 +364,7 @@ class PPOContinuous(Agent, TrainEpoch):
         """Initial action agent should take
 
         Returns:
-            np.ndarray: len = dims in action space
+            np.ndarray: shape = 1 x action_dims
         """
         # uniform distro within bounds
         ab = np.array(self.action_bounds)
@@ -419,7 +419,7 @@ class PPOContinuous(Agent, TrainEpoch):
                     (T + 1) x ... arrays
             reward (List[np.ndarray]):
                 Each list is a different trajectory.
-                Each ndarray has shape T x ...
+                Each ndarray has shape = T
             actions (List[np.ndarray]): where len of each state
                 Each list is a different trajectory.
                 Each ndarray has shape T x ...

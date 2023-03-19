@@ -51,7 +51,7 @@ class TrajectoryStore:
             ptr[2] = int(1 * end_bit)
         # add the new datapt
         for i, xi in enumerate(x):
-            self._dstore[i][process_idx, ptr[1]] = xi
+            self._dstore[i][process_idx, ptr[1]] = xi[:]
 
     def pull_trajectories(self) -> List[List[np.ndarray]]:
         """pull all trajectories; including active trajectories
