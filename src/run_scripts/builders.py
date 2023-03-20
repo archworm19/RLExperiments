@@ -46,6 +46,8 @@ class EnvsDiscrete(Enum):
 class EnvsContinuous(Enum):
     pendulum = EnvConfigCont('Pendulum-v1', {}, [(-2., 2.)],
                          3, 250)
+    mountain_car = EnvConfigCont("MountainCarContinuous-v0", {},
+                                 [(-1., 1.)], 2, 1000)
     lunar_continuous = EnvConfigCont("LunarLander-v2", {"continuous": True},
                                   [(-1., 1.), (-1., 1.)],
                                   8, 1000)
