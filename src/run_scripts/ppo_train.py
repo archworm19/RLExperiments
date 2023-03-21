@@ -1,6 +1,7 @@
 """PPO"""
 import numpy as np
 import numpy.random as npr
+from functools import partial
 from run_scripts.runner import simple_run
 from run_scripts.ll import async_master, sync_master
 from run_scripts.builders import EnvsDiscrete, EnvsContinuous, build_discrete_ppo, build_continuous_ppo
@@ -61,18 +62,27 @@ if __name__ == "__main__":
     #                                                learning_rate=.0001,
     #                                                entropy_scale=0.0, eta=0.3,
     #                                                layer_sizes=[256, 128, 64])
-    _, _, agent = build_continuous_ppo(EnvsContinuous.mountain_car, gamma=0.95,
-                                                   learning_rate=.0001,
-                                                   layer_sizes=[256, 128, 64],
-                                                   embed_dim=16,
-                                                   entropy_scale=0.0, eta=0.3)
-    test_T = 500
-    async_master(2, EnvsContinuous.mountain_car.value, agent, 100, int(5*test_T), test_T, "weights/",
-                 load_pretrained=False)
+    # _, _, agent = build_continuous_ppo(EnvsContinuous.mountain_car, gamma=0.95,
+    #                                                learning_rate=.0001,
+    #                                                layer_sizes=[256, 128, 64],
+    #                                                embed_dim=16,
+    #                                                entropy_scale=0.0, eta=0.3)
+    # _, _, agent = build_continuous_ppo(EnvsContinuous.bi_walker,
+    #                                                gamma=0.95,
+    #                                                learning_rate=.0001,
+    #                                                embed_dim=32,
+    #                                                entropy_scale=0.0, eta=0.3,
+    #                                                layer_sizes=[256, 128, 128])
+    # test_T = 1600
+    # async_master(4, EnvsContinuous.bi_walker.value, agent, 100, int(5*test_T), test_T, "weights/",
+    #              load_pretrained=False)
 
     # # sync testing
     # builder = partial(build_continuous_ppo, env=EnvsContinuous.pendulum, learning_rate=.0001,
     #                   layer_sizes=[256, 128, 64], embed_dim=16,
     #                   entropy_scale=0.0, eta=0.3)
-    # test_T = 500
-    # sync_master(builder, 2, "weights/", 100, int(test_T * 5), test_T, 42, False, True, load_pretrained=True)
+    builder = partial(build_continuous_ppo, env=EnvsContinuous.bi_walker, learning_rate=.0001,
+                      layer_sizes=[256, 128, 128], embed_dim=64,
+                      entropy_scale=0.0, eta=0.15)
+    test_T = 1600
+    sync_master(builder, 4, "weights/", 100, int(test_T * 5), test_T, 42, False, True, load_pretrained=True)
