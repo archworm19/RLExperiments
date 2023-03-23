@@ -19,7 +19,7 @@ class DenseNetwork(Layer):
         self.drops = [Dropout(drop_rate) for _ in layer_sizes]
         self.output_layer = Dense(output_size, activation="linear")
 
-    def call(self, x: tf.Tensor):
+    def call(self, x: tf.Tensor, train_mode: bool = False):
         for l, d in zip(self.layers, self.drops):
-            x = d(l(x))
+            x = d(l(x), training=train_mode)
         return self.output_layer(x)
