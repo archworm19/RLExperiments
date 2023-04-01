@@ -35,6 +35,10 @@ def positional_embedding(T: int, d: int, n: int = 10000,
 
 class TransformerBlock(Layer):
     # self-attention only
+    # Pre-LN transformer
+    #   implemented according to Xiong et al, 2020
+    #   > norm before mha
+    #   > norm before FF
 
     def __init__(self,
                  num_heads: int,
