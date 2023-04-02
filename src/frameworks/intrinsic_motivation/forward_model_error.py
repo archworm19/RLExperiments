@@ -8,6 +8,28 @@ from typing import List, Tuple
 from frameworks.layer_signatures import VectorModel, VectorTimeModel, VectorStateModel
 
 
+def _combine_2dims(x: List[tf.Tensor]) -> List[tf.Tensor]:
+    """Combine first 2 dims of each tensor in x.
+    Assumes all such tensors share the first 2 dims.
+
+    Args:
+        x (List[tf.Tensor]):
+
+    Returns:
+        List[tf.Tensor]: reshape(xi) for xi in x
+    """
+    sh = tf.shape(x[0])
+    dim0 = sh[0]
+    dim1 = sh[1]
+    state_res = []
+    for xi in x:
+        init_shape = tf.shape(xi)
+        new_sh0 = [tf.cast(dim0 * dim1, init_shape.dtype)]
+        new_shape = tf.concat([new_sh0, init_shape[2:]], axis=0)
+        state_res.append(tf.reshape(xi, new_shape))
+    return state_res
+
+
 def forward_error(forward_model: VectorModel,
                   encoder: VectorStateModel,
                   action_t: tf.Tensor,
@@ -63,12 +85,7 @@ def forward_time_error(forward_model: VectorTimeModel,
     yp, f_test_bit = forward_model(action_t, state_t)
 
     # combine the first 2 dims (encode in parallel):
-    state_res = []
-    for si in state_t:
-        init_shape = tf.shape(si)
-        new_sh0 = tf.constant([batch_size * T], dtype=init_shape.dtype)
-        new_shape = tf.concat([new_sh0, init_shape[2:]], axis=0)
-        state_res.append(tf.reshape(si, new_shape))
+    state_res = _combine_2dims(state_t)
     # --> (batch_size * T) x d   
     y, e_test_bit = encoder(state_res)
     y = tf.reshape(y, [batch_size, T, -1])
