@@ -80,6 +80,7 @@ def _kldiv_gauss(mu1: tf.Tensor, mu2: tf.Tensor,
     # mu1, mu2 = batch_size x num_model x d
     # var1, var2 = batch_size x num_model x d = diagonal covars
     #               for each batch sample
+    # Returns: batch_size x num_model (evaluated in parallel)
     #
     # formula
     #   = (1/2) ln | var2 var1^-1 | - d/2 + 1/2 trace(var1 var2^-1)
@@ -92,11 +93,11 @@ def _kldiv_gauss(mu1: tf.Tensor, mu2: tf.Tensor,
     #                                     = t3
     #              --> (mu2 - mu1) var2^-1 (mu2 - mu1) = sum((mu2 - mu1)^2 / var2)
     #                                                  = t4
-    t1 = tf.math.reduce_sum(tf.math.log(var2) - tf.math.log(var1), axis=1)
+    t1 = tf.math.reduce_sum(tf.math.log(var2) - tf.math.log(var1), axis=-1)
     t2 = -1. * tf.cast(tf.shape(mu1)[-1], t1.dtype)
     t3 = tf.math.reduce_sum(tf.math.divide(var1, var2))
     t4 = tf.math.reduce_sum(tf.math.divide(tf.math.pow(mu2 - mu1, 2.),
-                                           var2), axis=1)
+                                           var2), axis=-1)
     return 0.5 * (t1 + t2 + t3 + t4)
 
 def kldiv_ave_gauss(means: tf.Tensor, variances: tf.Tensor) -> tf.Tensor:
